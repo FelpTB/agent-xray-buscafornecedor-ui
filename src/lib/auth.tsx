@@ -4,6 +4,7 @@ import { api, type Comprador, type MeResponse } from "./api";
 type AuthState = {
   loading: boolean;
   authenticated: boolean;
+  localAuthOff: boolean;
   userId: string | null;
   nome: string | null;
   email: string | null;
@@ -14,6 +15,7 @@ type AuthState = {
 const EMPTY: AuthState = {
   loading: true,
   authenticated: false,
+  localAuthOff: false,
   userId: null,
   nome: null,
   email: null,
@@ -28,7 +30,7 @@ type AuthContextValue = AuthState & {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function fromMe(data: MeResponse): Omit<AuthState, "loading"> {
+function fromMe(data: MeResponse, localAuthOff: boolean): Omit<AuthState, "loading"> {
   const c = data.profile?.comprador || data.auth?.comprador || null;
   const limite = c?.limite_buscas ?? c?.limiteBuscas;
   const usadas = c?.buscas_realizadas ?? c?.buscasRealizadas;
@@ -38,11 +40,12 @@ function fromMe(data: MeResponse): Omit<AuthState, "loading"> {
   }
   return {
     authenticated: Boolean(data.authenticated && data.auth?.userId),
+    localAuthOff,
     userId: data.auth?.userId || data.profile?.user_id || null,
     nome: c?.nome || null,
     email: null,
     comprador: c,
-    quotaLabel,
+    quotaLabel: quotaLabel || (localAuthOff ? "Ambiente local (auth desligada)" : null),
   };
 }
 
@@ -52,7 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const data = await api.me();
-      setState({ loading: false, ...fromMe(data) });
+      const health = await api.health().catch(() => null);
+      const localAuthOff = health?.backend?.auth_mode === "off";
+      setState({ loading: false, ...fromMe(data, localAuthOff) });
     } catch {
       setState({ ...EMPTY, loading: false });
     }
@@ -66,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.logout();
     } finally {
-      setState({ ...EMPTY, loading: false });
+      setState((prev) => ({ ...EMPTY, loading: false, localAuthOff: prev.localAuthOff }));
     }
   }, []);
 

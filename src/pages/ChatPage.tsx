@@ -80,7 +80,7 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
-    if (!auth.authenticated) return;
+    if (!auth.authenticated && !auth.localAuthOff) return;
     void loadConversations();
     void api.config().then((cfg) => {
       const max = cfg.limits?.final_limit_max;
@@ -106,7 +106,7 @@ export function ChatPage() {
         }
       })();
     }
-  }, [auth.authenticated, loadConversations, persistSnapshot]);
+  }, [auth.authenticated, auth.localAuthOff, loadConversations, persistSnapshot]);
 
   const shellClass = [
     "app-shell",
@@ -214,7 +214,7 @@ export function ChatPage() {
       </div>
     );
   }
-  if (!auth.authenticated) {
+  if (!auth.authenticated && !auth.localAuthOff) {
     return <Navigate to="/login" replace />;
   }
 
@@ -277,7 +277,7 @@ export function ChatPage() {
           )}
         </div>
         <div className="user-box">
-          <div className="user-name">{auth.nome || "Comprador"}</div>
+          <div className="user-name">{auth.nome || (auth.localAuthOff ? "Ambiente local" : "Comprador")}</div>
           <div className="user-meta">{auth.quotaLabel || "Sessão autenticada"}</div>
           <button className="btn btn-ghost" type="button" onClick={() => void auth.logout()}>
             Sair

@@ -5,6 +5,7 @@
 import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +21,10 @@ const COOKIE_SECURE =
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const FONTE = "AgentUI";
 
+if (IS_PROD && !API_BASE) {
+  console.error("BUSCA_API_BASE_URL é obrigatório em produção.");
+  process.exit(1);
+}
 if (!API_BASE) {
   console.warn("BUSCA_API_BASE_URL não definido — o BFF não conseguirá falar com a API.");
 }
@@ -98,7 +103,7 @@ function authHeaders(token) {
   return h;
 }
 
-async function backendFetch(pathname, { method = "GET", token, body, query } = {}) {
+async function backendFetch(pathname, { method = "GET", token, body, query, timeoutMs = 60_000 } = {}) {
   if (!API_BASE) {
     const err = new Error("API de busca não configurada (BUSCA_API_BASE_URL)");
     err.status = 503;
@@ -112,6 +117,7 @@ async function backendFetch(pathname, { method = "GET", token, body, query } = {
   }
   const res = await fetch(url, {
     method,
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     headers: {
       ...authHeaders(token),
       ...(body != null ? { "Content-Type": "application/json" } : {}),
@@ -136,7 +142,7 @@ app.get("/health", async (_req, res) => {
   let backend = { reachable: false };
   if (API_BASE) {
     try {
-      const r = await backendFetch("/health");
+      const r = await backendFetch("/health", { timeoutMs: 3_000 });
       backend = { reachable: r.status === 200, ...(r.data || {}) };
     } catch (err) {
       backend = { reachable: false, error: err.message };
@@ -208,7 +214,7 @@ app.get("/api/auth/me", async (req, res) => {
   const token = getToken(req);
   if (!token) return res.json({ authenticated: false, auth: null, profile: null });
   try {
-    const result = await backendFetch("/auth/me", { token });
+    const result = await backendFetch("/auth/me", { token, timeoutMs: 10_000 });
     return sendBackend(res, result);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
@@ -254,6 +260,7 @@ app.post("/api/chat", async (req, res) => {
       method: "POST",
       token,
       body,
+      timeoutMs: 120_000,
     });
 
     if (result.status >= 200 && result.status < 300) {
@@ -334,10 +341,15 @@ app.delete("/api/conversations/:id", async (req, res) => {
 
 if (IS_PROD) {
   const dist = path.join(ROOT, "dist");
+  const indexHtml = path.join(dist, "index.html");
+  if (!existsSync(indexHtml)) {
+    console.error("dist/index.html ausente — o build Nixpacks (`npm run build`) precisa ter rodado.");
+    process.exit(1);
+  }
   app.use(express.static(dist, { maxAge: "1h", index: false }));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path === "/health") return next();
-    return res.sendFile(path.join(dist, "index.html"));
+    return res.sendFile(indexHtml);
   });
 }
 
@@ -346,7 +358,7 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Erro interno" });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `[ui] listening on :${PORT}  api=${API_BASE || "(unset)"}  prod=${IS_PROD}`,
   );

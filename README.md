@@ -33,16 +33,24 @@ Variável obrigatória:
 
 ## Railway
 
-Arquivos prontos: `railway.toml`, `nixpacks.toml`.
+Arquivos: `railway.toml`, `nixpacks.toml` (Node 20, `npm ci --include=dev`, `npm run build`, `npm start`).
 
-1. Crie um serviço a partir deste repositório.
-2. Defina `BUSCA_API_BASE_URL` (API de busca) e `COOKIE_SECURE=1`.
+1. New Project → Deploy from GitHub → `FelpTB/agent-xray-buscafornecedor-ui`.
+2. Variáveis do serviço:
+
+| Variável | Valor |
+|----------|--------|
+| `BUSCA_API_BASE_URL` | `https://buscafornecedor-searchapi-buscafornecedor.up.railway.app` (sem barra no final) |
+| `COOKIE_SECURE` | `1` |
+| `NODE_ENV` | `production` (o Railway costuma injetar) |
+
 3. **Não** defina `PORT` — o Railway injeta.
-4. Healthcheck: `GET /health`.
+4. Healthcheck: `GET /health` (já no `railway.toml`).
+5. Gere um domínio público (Settings → Networking → Generate domain).
 
-Na API de busca, inclua a origem desta UI em `CORS_ORIGINS` só se algum cliente browser chamar a API direto. Com o BFF, o browser fica same-origin e CORS da API não entra no caminho.
+O BFF serve o SPA em `dist/` e chama a API no servidor. O browser não precisa de CORS na API.
 
-Na API, o chat exige `XRAY_ENABLED=1` (já é o padrão do serviço `buscafornecedor-searchapi`).
+Na API de busca, o chat (`POST /search/xray/chat`) precisa estar montado (já é o caso no `main` atual). `QDRANT_BM25_VECTOR_NAME` é opcional: sem ele a busca específica usa só vetores densos.
 
 ## Segurança
 

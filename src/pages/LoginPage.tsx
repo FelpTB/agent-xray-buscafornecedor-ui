@@ -13,7 +13,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!auth.loading && auth.authenticated) {
+  if (!auth.loading && (auth.authenticated || auth.localAuthOff)) {
     return <Navigate to={from} replace />;
   }
 
