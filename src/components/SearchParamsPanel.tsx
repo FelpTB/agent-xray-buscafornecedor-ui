@@ -101,22 +101,40 @@ export function SearchParamsPanel({
         <div className="field-row">
           <div className="field">
             <label htmlFor="param-uf">UF</label>
-            <select
-              id="param-uf"
-              value={draft.uf}
-              disabled={busy}
-              onChange={(e) => patch({ uf: e.target.value })}
-            >
-              <option value="">—</option>
-              {UF_OPTIONS.map((uf) => (
-                <option key={uf} value={uf}>
+            <div className={`tag-input uf-input${busy ? " is-disabled" : ""}`}>
+              {draft.ufs.map((uf) => (
+                <span className="tag" key={uf}>
                   {uf}
-                </option>
+                  <button
+                    type="button"
+                    className="tag-remove"
+                    aria-label={`Remover ${uf}`}
+                    disabled={busy}
+                    onClick={() => patch({ ufs: draft.ufs.filter((u) => u !== uf) })}
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
-              {draft.uf && !UF_OPTIONS.includes(draft.uf as (typeof UF_OPTIONS)[number]) ? (
-                <option value={draft.uf}>{draft.uf}</option>
-              ) : null}
-            </select>
+              <select
+                id="param-uf"
+                value=""
+                disabled={busy}
+                aria-label="Adicionar UF"
+                onChange={(e) => {
+                  const next = e.target.value.toUpperCase();
+                  if (!next || draft.ufs.includes(next)) return;
+                  patch({ ufs: [...draft.ufs, next] });
+                }}
+              >
+                <option value="">Adicionar</option>
+                {UF_OPTIONS.filter((uf) => !draft.ufs.includes(uf)).map((uf) => (
+                  <option key={uf} value={uf}>
+                    {uf}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="field">
             <label htmlFor="param-radius">Raio (km)</label>
@@ -175,7 +193,7 @@ export function SearchParamsPanel({
             id="param-keywords"
             values={draft.keywords}
             disabled={busy}
-            placeholder="Digite e pressione Enter"
+            placeholder="Termo + Enter ou espaço"
             onChange={(keywords) => setDraft((prev) => setKeywordsOnDraft(prev, keywords))}
           />
         </div>

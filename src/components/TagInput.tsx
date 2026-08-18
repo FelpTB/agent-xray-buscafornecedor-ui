@@ -17,7 +17,7 @@ export function TagInput({ id, values, disabled, placeholder, onChange }: Props)
 
   function addFromText(raw: string) {
     const parts = raw
-      .split(/[,;]/)
+      .split(/[,;|/]+|\s+/)
       .map(normalizeTag)
       .filter(Boolean);
     if (!parts.length) return;
@@ -33,7 +33,8 @@ export function TagInput({ id, values, disabled, placeholder, onChange }: Props)
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" || e.key === ",") {
+    if (e.key === "Enter" || e.key === "," || e.key === " ") {
+      if (e.key === " " && !draft.trim()) return;
       e.preventDefault();
       addFromText(draft);
       return;
@@ -45,8 +46,8 @@ export function TagInput({ id, values, disabled, placeholder, onChange }: Props)
 
   return (
     <div className={`tag-input${disabled ? " is-disabled" : ""}`}>
-      {values.map((tag) => (
-        <span className="tag" key={tag}>
+      {values.map((tag, idx) => (
+        <span className="tag" key={`${tag}-${idx}`}>
           {tag}
           <button
             type="button"

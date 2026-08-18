@@ -58,7 +58,7 @@ export const VECTOR_LABELS: Record<string, string> = {
 export type SearchParamsDraft = {
   query: string;
   city: string;
-  uf: string;
+  ufs: string[];
   radiusKm: number | "";
   modeloNegocio: string;
   keywords: string[];
@@ -98,12 +98,44 @@ function firstString(value: unknown): string {
 
 function parseKeywords(raw: unknown): string[] {
   if (raw == null || raw === "") return [];
+  if (Array.isArray(raw)) {
+    return uniqueTerms(raw.flatMap((v) => parseKeywords(v)));
+  }
   const s = String(raw).trim();
   if (!s) return [];
-  return s
-    .split(",")
-    .map((p) => p.trim())
-    .filter(Boolean);
+  return uniqueTerms(
+    s
+      .split(/[,;|/]+|\s+/)
+      .map((p) => p.trim())
+      .filter(Boolean),
+  );
+}
+
+function uniqueTerms(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const t = item.trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function parseUfs(value: unknown): string[] {
+  const raw = asList(value).flatMap((part) => part.split(/[\s,;/|]+/));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw) {
+    const u = part.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(u) || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
 }
 
 export function emptyDraft(dimensionKeys: string[] = DEFAULT_DIMENSION_KEYS): SearchParamsDraft {
@@ -118,7 +150,7 @@ export function emptyDraft(dimensionKeys: string[] = DEFAULT_DIMENSION_KEYS): Se
   return {
     query: "",
     city: "",
-    uf: "",
+    ufs: [],
     radiusKm: "",
     modeloNegocio: "",
     keywords: [],
@@ -167,7 +199,7 @@ export function draftFromSnapshot(
     qm?.cidade_centro ||
     "";
 
-  const uf = firstString(geo.ufs || geo.uf || filter.uf || qm?.ufs || qm?.uf).toUpperCase();
+  const ufs = parseUfs(geo.ufs?.length ? geo.ufs : geo.uf || filter.uf || qm?.ufs || qm?.uf);
   const radiusRaw = geo.radius_km ?? qm?.radius_km;
   const radiusKm =
     typeof radiusRaw === "number" && Number.isFinite(radiusRaw)
@@ -180,7 +212,9 @@ export function draftFromSnapshot(
   const modelo =
     MODELO_NEGOCIO_OPTIONS.find((m) => m.toLowerCase() === modeloRaw.toLowerCase()) ||
     modeloRaw;
-  const keywords = parseKeywords(args.bm25_query || qm?.bm25);
+  const keywords = parseKeywords(
+    args.bm25_query || (typeof qm?.bm25 === "string" ? qm.bm25 : ""),
+  );
   const incomingWeights = args.weights && typeof args.weights === "object" ? args.weights : {};
   let weights: Record<string, number> = {};
   for (const k of keys) {
@@ -195,7 +229,7 @@ export function draftFromSnapshot(
   return {
     query: String(snap.query || args.query || qm?.query_original || ""),
     city: String(city || ""),
-    uf,
+    ufs,
     radiusKm,
     modeloNegocio: modelo,
     keywords,
@@ -227,15 +261,15 @@ export function draftToPayload(draft: SearchParamsDraft, dimensionKeys: string[]
   };
 
   const city = draft.city.trim();
-  const uf = draft.uf.trim().toUpperCase();
+  const ufs = parseUfs(draft.ufs);
   if (city) {
     payload.city_name = city;
     payload.radius_km = draft.radiusKm === "" ? 0 : Number(draft.radiusKm) || 0;
   }
-  if (uf) payload.uf = uf;
+  if (ufs.length) payload.uf = ufs.join(",");
   if (draft.modeloNegocio.trim()) payload.modelo_negocio = draft.modeloNegocio.trim();
   if (hasKeywords) {
-    payload.bm25_query = draft.keywords.join(", ");
+    payload.bm25_query = draft.keywords.join(" ");
   } else {
     payload.bm25 = false;
   }

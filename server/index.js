@@ -263,6 +263,7 @@ app.post("/api/chat", async (req, res) => {
       weights: sp.weights && typeof sp.weights === "object" ? sp.weights : undefined,
       city_name: typeof sp.city_name === "string" ? sp.city_name : undefined,
       uf: sp.uf,
+      ufs: sp.ufs,
       radius_km: sp.radius_km,
       modelo_negocio: typeof sp.modelo_negocio === "string" ? sp.modelo_negocio : undefined,
       bm25_query: typeof sp.bm25_query === "string" ? sp.bm25_query : undefined,

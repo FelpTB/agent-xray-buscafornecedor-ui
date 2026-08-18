@@ -262,6 +262,14 @@ img { max-width: 100%; display: block; }
   background: transparent;
 }
 .tag-input input:focus { outline: none; }
+.tag-input select {
+  flex: 1;
+  min-width: 6.5rem;
+  border: 0;
+  padding: 0.35rem 0.15rem;
+  background: transparent;
+}
+.tag-input select:focus { outline: none; }
 .tag {
   display: inline-flex;
   align-items: center;
