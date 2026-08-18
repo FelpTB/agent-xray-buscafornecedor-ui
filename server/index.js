@@ -227,6 +227,7 @@ app.get("/api/config", async (req, res) => {
     const cfg = result.data || {};
     return res.status(result.status).json({
       limits: cfg.limits || null,
+      dimension_keys: Array.isArray(cfg.dimension_keys) ? cfg.dimension_keys : null,
       auth: cfg.auth
         ? {
             required: cfg.auth.required,
@@ -254,6 +255,22 @@ app.post("/api/chat", async (req, res) => {
     final_limit: Number.isInteger(final_limit) && final_limit >= 1 ? final_limit : 10,
     rerank: req.body?.rerank === true,
   };
+  const sp = req.body?.search_params;
+  if (sp && typeof sp === "object" && !Array.isArray(sp)) {
+    body.search_params = {
+      query: typeof sp.query === "string" ? sp.query : undefined,
+      queries: sp.queries && typeof sp.queries === "object" ? sp.queries : undefined,
+      weights: sp.weights && typeof sp.weights === "object" ? sp.weights : undefined,
+      city_name: typeof sp.city_name === "string" ? sp.city_name : undefined,
+      uf: sp.uf,
+      radius_km: sp.radius_km,
+      modelo_negocio: typeof sp.modelo_negocio === "string" ? sp.modelo_negocio : undefined,
+      bm25_query: typeof sp.bm25_query === "string" ? sp.bm25_query : undefined,
+      bm25: sp.bm25 === false ? false : undefined,
+      exact_terms: sp.exact_terms,
+      intent: typeof sp.intent === "string" ? sp.intent : undefined,
+    };
+  }
 
   try {
     const result = await backendFetch("/search/xray/chat", {

@@ -105,12 +105,10 @@ export type ConversationDetail = ConversationItem & {
 
 export type SearchSettings = {
   finalLimit: number;
-  rerank: boolean;
 };
 
 export const DEFAULT_SETTINGS: SearchSettings = {
   finalLimit: 10,
-  rerank: false,
 };
 
 export function apiErrorMessage(data: unknown, fallback = "Algo deu errado. Tente de novo."): string {
@@ -175,13 +173,15 @@ export const api = {
   config: () =>
     request<{
       limits: { final_limit_max?: number; final_limit_default?: number } | null;
+      dimension_keys?: string[] | null;
       llm_rerank: { enabled: boolean };
     }>("/api/config"),
   chat: (body: {
     message: string;
     session_id?: string | null;
     final_limit: number;
-    rerank: boolean;
+    rerank?: boolean;
+    search_params?: Record<string, unknown>;
   }) => request<ChatResponse>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
   resetChat: (session_id?: string | null) =>
     request<{ session_id: string }>("/api/chat/reset", {

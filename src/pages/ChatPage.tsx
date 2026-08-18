@@ -2,23 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Composer } from "../components/Composer";
 import { MarkdownBody, visibleMessages } from "../components/MarkdownBody";
-import { SearchUsedPanel } from "../components/SearchUsedPanel";
-import { SettingsPanel } from "../components/SettingsPanel";
-import { SupplierList } from "../components/SupplierList";
+import { SearchParamsPanel } from "../components/SearchParamsPanel";
 import {
   api,
   DEFAULT_SETTINGS,
   type ChatMessage,
+  type ChatResponse,
   type ConversationItem,
   type SearchSettings,
 } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { mapResultsForDisplay, type SupplierCard } from "../lib/display";
 import {
   snapshotFromChat,
   snapshotFromConsulta,
   type SearchSnapshot,
 } from "../lib/searchExplain";
+import { DEFAULT_DIMENSION_KEYS, type SearchParamsPayload } from "../lib/searchParams";
 
 const SUGGESTIONS = [
   "Procuro fabricantes de embalagens plásticas em Campinas, raio de 50 km",
@@ -60,9 +59,9 @@ export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(() => sessionStorage.getItem(SESSION_KEY));
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [settings, setSettings] = useState<SearchSettings>(DEFAULT_SETTINGS);
-  const [cards, setCards] = useState<SupplierCard[]>([]);
   const [snapshot, setSnapshot] = useState<SearchSnapshot | null>(() => readStoredSnapshot());
   const [maxLimit, setMaxLimit] = useState(20);
+  const [dimensionKeys, setDimensionKeys] = useState<string[]>(DEFAULT_DIMENSION_KEYS);
 
   const persistSnapshot = useCallback((next: SearchSnapshot | null) => {
     setSnapshot(next);
@@ -85,6 +84,9 @@ export function ChatPage() {
     void api.config().then((cfg) => {
       const max = cfg.limits?.final_limit_max;
       if (typeof max === "number" && max > 0) setMaxLimit(max);
+      if (Array.isArray(cfg.dimension_keys) && cfg.dimension_keys.length) {
+        setDimensionKeys(cfg.dimension_keys);
+      }
     });
     const existing = sessionStorage.getItem(SESSION_KEY);
     if (existing) {
@@ -118,39 +120,64 @@ export function ChatPage() {
 
   const thread = useMemo(() => visibleMessages(messages), [messages]);
 
+  function applyChatResponse(data: ChatResponse, fallbackPrev: ChatMessage[]) {
+    if (data.session_id) {
+      setSessionId(data.session_id);
+      sessionStorage.setItem(SESSION_KEY, data.session_id);
+    }
+    const next = visibleMessages(data.messages, data.reply);
+    setMessages(
+      next.length ? next : [...fallbackPrev, { role: "assistant", content: data.reply || "Pronto." }],
+    );
+    if (data.search?.results?.length) setInspectorOpen(true);
+    const used = snapshotFromChat(data);
+    if (used) persistSnapshot(used);
+  }
+
   async function send(text: string) {
     const message = text.trim();
     if (!message || busy) return;
     setBusy(true);
     setError(null);
     setDraft("");
-    setMessages((prev) => [...prev, { role: "user", content: message }]);
+    const optimistic: ChatMessage[] = [...messages, { role: "user", content: message }];
+    setMessages(optimistic);
     try {
       const data = await api.chat({
         message,
         session_id: sessionId,
         final_limit: settings.finalLimit,
-        rerank: settings.rerank,
+        rerank: false,
       });
-      if (data.session_id) {
-        setSessionId(data.session_id);
-        sessionStorage.setItem(SESSION_KEY, data.session_id);
-      }
       if (data.session_upgraded) await auth.refresh();
-      setMessages((prev) => {
-        const next = visibleMessages(data.messages, data.reply);
-        if (next.length) return next;
-        return [...prev, { role: "assistant", content: data.reply || "Pronto." }];
-      });
-      if (data.search?.results?.length) {
-        setCards(mapResultsForDisplay(data.search.results));
-        setInspectorOpen(true);
-      }
-      const used = snapshotFromChat(data);
-      if (used) persistSnapshot(used);
+      applyChatResponse(data, optimistic);
       void loadConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível concluir a busca.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rerunSearch(params: SearchParamsPayload) {
+    if (busy || !params.query?.trim()) return;
+    setBusy(true);
+    setError(null);
+    const message = "Refazer busca com os parâmetros ajustados.";
+    const optimistic: ChatMessage[] = [...messages, { role: "user", content: message }];
+    setMessages(optimistic);
+    try {
+      const data = await api.chat({
+        message,
+        session_id: sessionId,
+        final_limit: settings.finalLimit,
+        rerank: false,
+        search_params: params,
+      });
+      applyChatResponse(data, optimistic);
+      void loadConversations();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível refazer a busca.");
     } finally {
       setBusy(false);
     }
@@ -166,7 +193,6 @@ export function ChatPage() {
     persistSnapshot(null);
     setSessionId(null);
     setMessages([]);
-    setCards([]);
     setError(null);
     setSidebarOpen(false);
   }
@@ -292,7 +318,7 @@ export function ChatPage() {
           </button>
           <h1>Assistente de fornecedores</h1>
           <button className="btn mobile-only" type="button" onClick={() => setInspectorOpen(true)}>
-            Como buscamos
+            Parâmetros
           </button>
         </header>
 
@@ -337,20 +363,22 @@ export function ChatPage() {
         <Composer value={draft} disabled={busy} onChange={setDraft} onSubmit={() => void send(draft)} />
       </main>
 
-      <aside className="inspector" aria-label="Resultados e preferências">
+      <aside className="inspector" aria-label="Parâmetros da busca">
         <div className="brand">
           <div>
-            <strong>Como buscamos</strong>
-            <span>{cards.length ? `${cards.length} fornecedores nesta lista` : "Recortes da consulta"}</span>
+            <strong>Parâmetros da busca</strong>
           </div>
         </div>
         <div className="inspector-body">
-          <SearchUsedPanel snapshot={snapshot} />
-          <section className="card">
-            <h3>Fornecedores encontrados</h3>
-            <SupplierList cards={cards} />
-          </section>
-          <SettingsPanel settings={settings} maxLimit={maxLimit} onChange={setSettings} />
+          <SearchParamsPanel
+            snapshot={snapshot}
+            dimensionKeys={dimensionKeys}
+            finalLimit={settings.finalLimit}
+            maxLimit={maxLimit}
+            busy={busy}
+            onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
+            onRerun={(payload) => void rerunSearch(payload)}
+          />
         </div>
       </aside>
     </div>
