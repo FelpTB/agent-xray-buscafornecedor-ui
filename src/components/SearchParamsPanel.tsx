@@ -10,6 +10,7 @@ import {
   type SearchParamsPayload,
   UF_OPTIONS,
   vectorLabel,
+  weightsForFilledQueries,
   weightSum,
 } from "../lib/searchParams";
 import type { SearchSnapshot } from "../lib/searchExplain";
@@ -54,6 +55,33 @@ export function SearchParamsPanel({
 
   function patch(partial: Partial<SearchParamsDraft>) {
     setDraft((prev) => ({ ...prev, ...partial }));
+  }
+
+  function patchQuery(key: string, text: string) {
+    setDraft((prev) => {
+      const queries = { ...prev.queries, [key]: text };
+      const had = Boolean((prev.queries[key] || "").trim());
+      const has = Boolean(text.trim());
+      const hasBm25 = prev.keywords.length > 0;
+      const weights = { ...prev.weights };
+      if (!had && has) {
+        const filled =
+          Object.keys(queries).filter((k) => (queries[k] || "").trim()).length + (hasBm25 ? 1 : 0);
+        weights[key] = 1 / Math.max(filled, 1);
+      }
+      return {
+        ...prev,
+        queries,
+        weights: weightsForFilledQueries(weights, queries, hasBm25),
+      };
+    });
+  }
+
+  function patchWeight(key: string, next: number) {
+    setDraft((prev) => ({
+      ...prev,
+      weights: adjustWeight(prev.weights, key, next, prev.queries, prev.keywords.length > 0),
+    }));
   }
 
   if (!snapshot) {
@@ -204,7 +232,13 @@ export function SearchParamsPanel({
         <p className="weight-sum" aria-live="polite">
           Total {sumPct}%
         </p>
-        {weightKeys.map((key) => (
+        {weightKeys.map((key) => {
+          const queryFilled =
+            key === "bm25"
+              ? draft.keywords.length > 0
+              : Boolean((draft.queries[key] || "").trim());
+          const weightDisabled = Boolean(busy) || !queryFilled;
+          return (
           <div className="vector-row" key={key}>
             <label htmlFor={`vec-q-${key}`}>{vectorLabel(key)}</label>
             {key !== "bm25" ? (
@@ -213,9 +247,7 @@ export function SearchParamsPanel({
                 rows={2}
                 value={draft.queries[key] || ""}
                 disabled={busy}
-                onChange={(e) =>
-                  patch({ queries: { ...draft.queries, [key]: e.target.value } })
-                }
+                onChange={(e) => patchQuery(key, e.target.value)}
               />
             ) : (
               <p className="help" style={{ margin: "0 0 0.35rem" }}>
@@ -230,13 +262,9 @@ export function SearchParamsPanel({
                 max={100}
                 step={1}
                 value={Math.round((draft.weights[key] || 0) * 100)}
-                disabled={busy}
+                disabled={weightDisabled}
                 aria-label={`Peso de ${vectorLabel(key)}`}
-                onChange={(e) =>
-                  patch({
-                    weights: adjustWeight(draft.weights, key, Number(e.target.value) / 100),
-                  })
-                }
+                onChange={(e) => patchWeight(key, Number(e.target.value) / 100)}
               />
               <input
                 type="number"
@@ -245,18 +273,15 @@ export function SearchParamsPanel({
                 step={1}
                 className="weight-pct"
                 value={Math.round((draft.weights[key] || 0) * 100)}
-                disabled={busy}
+                disabled={weightDisabled}
                 aria-label={`Peso percentual de ${vectorLabel(key)}`}
-                onChange={(e) =>
-                  patch({
-                    weights: adjustWeight(draft.weights, key, Number(e.target.value) / 100),
-                  })
-                }
+                onChange={(e) => patchWeight(key, Number(e.target.value) / 100)}
               />
               <span className="weight-unit">%</span>
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
 
       <section className="card" aria-labelledby="limit-title">

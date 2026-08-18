@@ -63,6 +63,12 @@ export function ChatPage() {
   const [maxLimit, setMaxLimit] = useState(20);
   const [dimensionKeys, setDimensionKeys] = useState<string[]>(DEFAULT_DIMENSION_KEYS);
 
+  useEffect(() => {
+    if (!auth.authenticated && !auth.localAuthOff) return;
+    document.documentElement.classList.add("layout-fixed");
+    return () => document.documentElement.classList.remove("layout-fixed");
+  }, [auth.authenticated, auth.localAuthOff]);
+
   const persistSnapshot = useCallback((next: SearchSnapshot | null) => {
     setSnapshot(next);
     if (next) sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next));
