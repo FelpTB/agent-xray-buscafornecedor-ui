@@ -1,5 +1,7 @@
 import type { SearchSnapshot } from "./searchExplain";
 
+export { VECTOR_LABELS, vectorLabel } from "./paramCopy";
+
 export const MODELO_NEGOCIO_OPTIONS = [
   "Fabricante",
   "Distribuidor",
@@ -40,21 +42,6 @@ export const UF_OPTIONS = [
 
 export const DEFAULT_DIMENSION_KEYS = ["produto", "servico", "descricao", "publico", "cliente"];
 
-export const VECTOR_LABELS: Record<string, string> = {
-  produto: "O que a empresa vende",
-  v_produto: "O que a empresa vende",
-  servico: "Serviço prestado",
-  v_servico: "Serviço prestado",
-  descricao: "Descrição da empresa",
-  v_descricao: "Descrição da empresa",
-  publico: "Para quem vende",
-  v_publico: "Para quem vende",
-  cliente: "Clientes típicos",
-  v_cliente: "Clientes típicos",
-  clientes: "Clientes típicos",
-  bm25: "Palavras no cadastro",
-};
-
 export type SearchParamsDraft = {
   query: string;
   city: string;
@@ -64,6 +51,7 @@ export type SearchParamsDraft = {
   keywords: string[];
   queries: Record<string, string>;
   weights: Record<string, number>;
+  lockedWeights: string[];
   exactTerms: string[];
   intent: string | null;
 };
@@ -155,6 +143,7 @@ export function emptyDraft(dimensionKeys: string[] = DEFAULT_DIMENSION_KEYS): Se
     keywords: [],
     queries,
     weights: weightsForFilledQueries(weights, queries, false),
+    lockedWeights: [],
     exactTerms: [],
     intent: null,
   };
@@ -234,6 +223,7 @@ export function draftFromSnapshot(
     keywords,
     queries,
     weights: weightsForFilledQueries(weights, queries, keywords.length > 0),
+    lockedWeights: [],
     exactTerms: asList(args.exact_terms || qm?.exact_terms),
     intent: snap.intent || qm?.intent || null,
   };
@@ -251,7 +241,12 @@ export function draftToPayload(draft: SearchParamsDraft, dimensionKeys: string[]
   const weightSource: Record<string, number> = {};
   for (const k of keys) weightSource[k] = Number(draft.weights[k]) || 0;
   if (hasKeywords) weightSource.bm25 = Number(draft.weights.bm25) || 0;
-  const weights = weightsForFilledQueries(weightSource, draft.queries, hasKeywords);
+  const weights = weightsForFilledQueries(
+    weightSource,
+    draft.queries,
+    hasKeywords,
+    draft.lockedWeights,
+  );
 
   const payload: SearchParamsPayload = {
     query: draft.query.trim(),
@@ -285,11 +280,37 @@ function hasQueryText(queries: Record<string, string>, key: string): boolean {
   return Boolean((queries[key] || "").trim());
 }
 
-/** Zera peso de vetores sem query e renormaliza os preenchidos para soma 1. */
+function activeWeightKeys(
+  weights: Record<string, number>,
+  queries: Record<string, string>,
+  hasBm25: boolean,
+): string[] {
+  return Object.keys(weights).filter((k) => {
+    if (k === "bm25") return hasBm25;
+    return hasQueryText(queries, k);
+  });
+}
+
+function applyRemainder(out: Record<string, number>, preferred: string[]): Record<string, number> {
+  const keys = Object.keys(out);
+  if (!keys.length) return out;
+  const sum = keys.reduce((a, k) => a + out[k], 0);
+  const delta = Number((1 - sum).toFixed(4));
+  if (Math.abs(delta) < 0.00005) return out;
+  const target =
+    preferred.find((k) => (out[k] || 0) > 0) || preferred[0] || keys.find((k) => out[k] > 0) || keys[0];
+  if (!target) return out;
+  out[target] = Number((out[target] + delta).toFixed(4));
+  if (out[target] < 0) out[target] = 0;
+  return out;
+}
+
+/** Zera peso de dimensões sem query e renormaliza os preenchidos para soma 1. */
 export function weightsForFilledQueries(
   weights: Record<string, number>,
   queries: Record<string, string>,
   hasBm25: boolean,
+  lockedKeys: string[] = [],
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(weights)) {
@@ -302,8 +323,9 @@ export function weightsForFilledQueries(
   if (hasBm25 && !Object.prototype.hasOwnProperty.call(out, "bm25")) out.bm25 = 0;
   if (!hasBm25) delete out.bm25;
 
-  const positive = Object.keys(out).filter((k) => (out[k] || 0) > 0);
-  if (!positive.length) {
+  const active = activeWeightKeys(out, queries, hasBm25);
+  const lockedSet = new Set(lockedKeys.filter((k) => active.includes(k)));
+  if (!active.length) {
     const fallback =
       Object.keys(out).find((k) => k !== "bm25" && hasQueryText(queries, k)) ||
       (hasBm25 ? "bm25" : undefined) ||
@@ -315,51 +337,100 @@ export function weightsForFilledQueries(
     }
     return out;
   }
-  return renormalizeWeights(out);
+
+  const positive = active.filter((k) => (out[k] || 0) > 0);
+  if (!positive.length) {
+    const fallback = active.find((k) => !lockedSet.has(k)) || active[0];
+    for (const k of Object.keys(out)) out[k] = 0;
+    out[fallback] = 1;
+    return out;
+  }
+
+  const activeOut: Record<string, number> = {};
+  for (const k of active) activeOut[k] = out[k] || 0;
+  const normalized = renormalizeWeights(activeOut, [...lockedSet]);
+  const merged: Record<string, number> = { ...out };
+  for (const k of Object.keys(merged)) {
+    if (!active.includes(k)) merged[k] = 0;
+  }
+  return { ...merged, ...normalized };
 }
 
-export function renormalizeWeights(weights: Record<string, number>): Record<string, number> {
+export function renormalizeWeights(
+  weights: Record<string, number>,
+  lockedKeys: string[] = [],
+): Record<string, number> {
   const keys = Object.keys(weights);
   if (!keys.length) return weights;
   const out: Record<string, number> = {};
   for (const k of keys) out[k] = Math.max(0, Number(weights[k]) || 0);
-  const positive = keys.filter((k) => out[k] > 0);
-  if (!positive.length) {
-    out[keys[0]] = 1;
-    return out;
+
+  const lockedSet = new Set(lockedKeys.filter((k) => keys.includes(k)));
+  const locked = keys.filter((k) => lockedSet.has(k));
+  const unlocked = keys.filter((k) => !lockedSet.has(k));
+
+  const lockedSum = locked.reduce((a, k) => a + out[k], 0);
+  if (lockedSum > 1 && lockedSum > 0) {
+    const scale = 1 / lockedSum;
+    for (const k of locked) out[k] = Number((out[k] * scale).toFixed(4));
+    for (const k of unlocked) out[k] = 0;
+    return applyRemainder(out, locked);
   }
-  const sum = positive.reduce((a, k) => a + out[k], 0);
-  for (const k of positive) out[k] = Number((out[k] / sum).toFixed(4));
-  const fixed = keys.reduce((a, k) => a + out[k], 0);
-  out[positive[0]] = Number((out[positive[0]] + (1 - fixed)).toFixed(4));
-  if (out[positive[0]] < 0) out[positive[0]] = 0;
-  return out;
+
+  const rest = Number(Math.max(0, 1 - lockedSum).toFixed(4));
+  const unlockedPositive = unlocked.filter((k) => out[k] > 0);
+  const pool = unlockedPositive.length ? unlockedPositive : unlocked;
+
+  if (!pool.length) {
+    if (lockedSum > 0 && lockedSum < 1) {
+      const scale = 1 / lockedSum;
+      for (const k of locked) out[k] = Number((out[k] * scale).toFixed(4));
+    } else if (lockedSum <= 0 && keys.length) {
+      out[keys[0]] = 1;
+    }
+    return applyRemainder(out, locked.length ? locked : keys);
+  }
+
+  const poolSum = pool.reduce((a, k) => a + out[k], 0);
+  if (poolSum <= 0) {
+    const each = Number((rest / pool.length).toFixed(4));
+    for (const k of unlocked) out[k] = 0;
+    for (const k of pool) out[k] = each;
+  } else {
+    const scale = rest / poolSum;
+    for (const k of unlocked) {
+      out[k] = pool.includes(k) ? Number((out[k] * scale).toFixed(4)) : 0;
+    }
+  }
+  return applyRemainder(out, pool);
 }
 
-/** Altera um peso e redistribui o restante só entre vetores com query. */
+/** Altera um peso e redistribui o restante só entre dimensões destravadas com query. */
 export function adjustWeight(
   weights: Record<string, number>,
   key: string,
   next: number,
   queries: Record<string, string> = {},
   hasBm25 = Object.prototype.hasOwnProperty.call(weights, "bm25"),
+  lockedKeys: string[] = [],
 ): Record<string, number> {
-  const active = Object.keys(weights).filter((k) => {
-    if (k === "bm25") return hasBm25;
-    return hasQueryText(queries, k);
-  });
+  const active = activeWeightKeys(weights, queries, hasBm25);
   if (!active.includes(key)) {
-    return weightsForFilledQueries(weights, queries, hasBm25);
+    return weightsForFilledQueries(weights, queries, hasBm25, lockedKeys);
   }
-  const clamped = Math.min(1, Math.max(0, Number(next) || 0));
-  const others = active.filter((k) => k !== key);
-  const rest = 1 - clamped;
+  const locked = new Set(lockedKeys.filter((k) => k !== key && active.includes(k)));
+  const lockedSum = [...locked].reduce((s, k) => s + Math.max(0, Number(weights[k]) || 0), 0);
+  const maxForKey = Math.max(0, 1 - lockedSum);
+  const clamped = Math.min(maxForKey, Math.max(0, Number(next) || 0));
+  const others = active.filter((k) => k !== key && !locked.has(k));
+  const rest = Number((1 - lockedSum - clamped).toFixed(4));
   const out: Record<string, number> = {};
   for (const k of Object.keys(weights)) out[k] = 0;
+  for (const k of locked) out[k] = Number((Math.max(0, Number(weights[k]) || 0)).toFixed(4));
   out[key] = Number(clamped.toFixed(4));
   if (!others.length) {
-    out[key] = 1;
-    return weightsForFilledQueries(out, queries, hasBm25);
+    out[key] = Number(maxForKey.toFixed(4));
+    return weightsForFilledQueries(out, queries, hasBm25, lockedKeys);
   }
   const othersSum = others.reduce((s, k) => s + (Number(weights[k]) || 0), 0);
   if (othersSum <= 0) {
@@ -369,25 +440,30 @@ export function adjustWeight(
     const scale = rest / othersSum;
     for (const k of others) out[k] = Number(((Number(weights[k]) || 0) * scale).toFixed(4));
   }
-  return weightsForFilledQueries(out, queries, hasBm25);
+  return weightsForFilledQueries(out, queries, hasBm25, lockedKeys);
 }
 
 export function setKeywordsOnDraft(draft: SearchParamsDraft, keywords: string[]): SearchParamsDraft {
   const hadBm25 = Object.prototype.hasOwnProperty.call(draft.weights, "bm25");
+  const lockedWeights = draft.lockedWeights || [];
   const next: SearchParamsDraft = { ...draft, keywords };
   const hasBm25 = keywords.length > 0;
   if (hasBm25 && !hadBm25) {
-    next.weights = adjustWeight({ ...draft.weights, bm25: 0 }, "bm25", 0.2, draft.queries, true);
+    next.weights = adjustWeight(
+      { ...draft.weights, bm25: 0 },
+      "bm25",
+      0.2,
+      draft.queries,
+      true,
+      lockedWeights,
+    );
   } else if (!hasBm25 && hadBm25) {
     const dense = { ...draft.weights };
     delete dense.bm25;
-    next.weights = weightsForFilledQueries(dense, draft.queries, false);
+    next.lockedWeights = lockedWeights.filter((k) => k !== "bm25");
+    next.weights = weightsForFilledQueries(dense, draft.queries, false, next.lockedWeights);
   } else {
-    next.weights = weightsForFilledQueries(draft.weights, draft.queries, hasBm25);
+    next.weights = weightsForFilledQueries(draft.weights, draft.queries, hasBm25, lockedWeights);
   }
   return next;
-}
-
-export function vectorLabel(key: string): string {
-  return VECTOR_LABELS[key] || key;
 }

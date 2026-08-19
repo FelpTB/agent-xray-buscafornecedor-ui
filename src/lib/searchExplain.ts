@@ -1,5 +1,7 @@
 /** Traduz o contrato técnico da busca (tool args + Query Manager + geo) para o comprador. */
 
+import { vectorLabel } from "./paramCopy";
+
 export type SearchArgs = {
   query?: string;
   queries?: Record<string, string>;
@@ -59,57 +61,6 @@ export type ExplainedFact = {
   title: string;
   value: string;
   hint: string;
-};
-
-const WEIGHT_LABELS: Record<string, { title: string; hint: string }> = {
-  produto: {
-    title: "O que a empresa vende",
-    hint: "Quanto a busca priorizou o catálogo de produtos do fornecedor.",
-  },
-  v_produto: {
-    title: "O que a empresa vende",
-    hint: "Quanto a busca priorizou o catálogo de produtos do fornecedor.",
-  },
-  servico: {
-    title: "Serviço prestado",
-    hint: "Quanto a busca priorizou o tipo de serviço que a empresa executa.",
-  },
-  v_servico: {
-    title: "Serviço prestado",
-    hint: "Quanto a busca priorizou o tipo de serviço que a empresa executa.",
-  },
-  descricao: {
-    title: "Descrição da empresa",
-    hint: "Quanto pesou o texto geral do cadastro (o que a empresa diz sobre si).",
-  },
-  v_descricao: {
-    title: "Descrição da empresa",
-    hint: "Quanto pesou o texto geral do cadastro (o que a empresa diz sobre si).",
-  },
-  publico: {
-    title: "Para quem vende",
-    hint: "Quanto pesou o público-alvo do fornecedor (indústrias, condomínios, hospitais…).",
-  },
-  v_publico: {
-    title: "Para quem vende",
-    hint: "Quanto pesou o público-alvo do fornecedor (indústrias, condomínios, hospitais…).",
-  },
-  cliente: {
-    title: "Clientes típicos",
-    hint: "Quanto pesou o perfil de clientes que a empresa já atende.",
-  },
-  v_cliente: {
-    title: "Clientes típicos",
-    hint: "Quanto pesou o perfil de clientes que a empresa já atende.",
-  },
-  clientes: {
-    title: "Clientes típicos",
-    hint: "Quanto pesou o perfil de clientes que a empresa já atende.",
-  },
-  bm25: {
-    title: "Palavras no cadastro",
-    hint: "Quanto pesou achar as palavras-chave exatamente no texto do perfil — útil quando o termo é específico.",
-  },
 };
 
 function asList(value: unknown): string[] {
@@ -407,11 +358,11 @@ export function explainSearch(snap: SearchSnapshot | null): ExplainedFact[] {
 
   const queries = args.queries || {};
   const qmTexts: Array<[string, string | null | undefined]> = [
-    ["Produto", queries.produto || qm?.produtos],
-    ["Serviço", queries.servico || qm?.servicos],
-    ["Descrição", queries.descricao || qm?.descricao],
-    ["Público", queries.publico || qm?.publico],
-    ["Clientes", queries.cliente || queries.clientes || qm?.clientes],
+    ["Produtos", queries.produto || qm?.produtos],
+    ["Serviços", queries.servico || qm?.servicos],
+    ["Descrição da empresa", queries.descricao || qm?.descricao],
+    ["Público alvo", queries.publico || qm?.publico],
+    ["Clientes típicos", queries.cliente || queries.clientes || qm?.clientes],
   ];
   const usedTexts = qmTexts.filter(([, v]) => typeof v === "string" && v.trim());
   if (usedTexts.length) {
@@ -433,11 +384,11 @@ export function explainSearch(snap: SearchSnapshot | null): ExplainedFact[] {
       title: "O que pesou mais na lista",
       value: weightEntries
         .map(([k, v]) => {
-          const lab = WEIGHT_LABELS[k]?.title || k;
+          const lab = vectorLabel(k);
           return `${lab} ${pct(v)}`;
         })
         .join(" · "),
-      hint: "Não é nota da empresa: é a ênfase da busca. Se “o que a empresa vende” está em 45%, a lista privilegia quem oferece o produto certo, mais do que o público ou a descrição.",
+      hint: "Não é nota da empresa: é a ênfase da busca. Se “Produtos” está em 45%, a lista privilegia quem oferece o item certo, mais do que o público ou a descrição.",
     });
   }
 
