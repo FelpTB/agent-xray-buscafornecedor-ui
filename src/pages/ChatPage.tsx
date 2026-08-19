@@ -29,6 +29,17 @@ const SUGGESTIONS = [
 const SESSION_KEY = "bf_ui_session_id";
 const SNAPSHOT_KEY = "bf_ui_search_snapshot";
 const PENDING_CHAT_ID = "pending-new-chat";
+const BLANK_TITLES = new Set(["", "Nova conversa", "Conversa"]);
+
+function isBlankHistoryItem(c: ConversationItem): boolean {
+  if (c.creating) return true;
+  const title = (c.title || "").trim();
+  return BLANK_TITLES.has(title) && !c.last_search_id;
+}
+
+function hasUserMessage(messages: ChatMessage[]): boolean {
+  return messages.some((m) => m.role === "user" && Boolean(m.content?.trim()));
+}
 
 function readStoredSnapshot(): SearchSnapshot | null {
   try {
@@ -134,6 +145,13 @@ export function ChatPage() {
 
   const thread = useMemo(() => visibleMessages(messages), [messages]);
 
+  const currentIsBlank = !hasUserMessage(messages) && !snapshot?.searchId;
+  const alreadyOnBlank =
+    currentIsBlank &&
+    Boolean(sessionId) &&
+    sessionId !== PENDING_CHAT_ID &&
+    conversations.some((c) => c.id === sessionId && isBlankHistoryItem(c));
+
   function applyChatResponse(data: ChatResponse, fallbackPrev: ChatMessage[]) {
     if (data.session_id) {
       setSessionId(data.session_id);
@@ -197,8 +215,27 @@ export function ChatPage() {
     }
   }
 
-  async function startNewChat() {
+  async function startNewChat(opts?: { excludeId?: string }) {
     if (creatingChat) return;
+    const reusable = conversations.find(
+      (c) =>
+        c.id !== PENDING_CHAT_ID &&
+        c.id !== opts?.excludeId &&
+        isBlankHistoryItem(c) &&
+        !(c.id === sessionId && hasUserMessage(messages)),
+    );
+    if (reusable) {
+      if (reusable.id === sessionId && currentIsBlank) {
+        setSidebarOpen(false);
+        return;
+      }
+      await openConversation(reusable.id);
+      return;
+    }
+    if (currentIsBlank && sessionId && sessionId !== PENDING_CHAT_ID && sessionId !== opts?.excludeId) {
+      setSidebarOpen(false);
+      return;
+    }
     setCreatingChat(true);
     setRatingPrompt(null);
     setRatingError(null);
@@ -252,7 +289,7 @@ export function ChatPage() {
   }
 
   async function requestNewChat() {
-    if (creatingChat || ratingPrompt || busy) return;
+    if (creatingChat || ratingPrompt || busy || alreadyOnBlank) return;
     const searchId =
       (typeof snapshot?.searchId === "string" && snapshot.searchId.trim()) ||
       conversations.find((c) => c.id === sessionId)?.last_search_id ||
@@ -320,8 +357,8 @@ export function ChatPage() {
     if (!window.confirm("Apagar esta conversa do histórico?")) return;
     try {
       await api.deleteConversation(id);
-      if (sessionId === id) await startNewChat();
-      void loadConversations();
+      if (sessionId === id) await startNewChat({ excludeId: id });
+      else void loadConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível apagar.");
     }
@@ -372,11 +409,19 @@ export function ChatPage() {
           <button
             className="btn btn-primary btn-block"
             type="button"
-            disabled={creatingChat || Boolean(ratingPrompt) || busy}
+            disabled={creatingChat || Boolean(ratingPrompt) || busy || alreadyOnBlank}
+            title={
+              alreadyOnBlank
+                ? "Já existe uma conversa vazia. Envie uma busca nela antes de abrir outra."
+                : undefined
+            }
             onClick={() => void requestNewChat()}
           >
             Nova conversa
           </button>
+          {alreadyOnBlank ? (
+            <p className="help">Já existe uma conversa vazia. Use-a antes de abrir outra.</p>
+          ) : null}
         </div>
         <div className="conv-list">
           <h2>Histórico</h2>
