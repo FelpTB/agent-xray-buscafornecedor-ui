@@ -77,6 +77,7 @@ export type ConsultaRow = {
   uf?: unknown;
   municipio?: unknown;
   modelo_negocio?: string | null;
+  qualidade?: string | null;
 };
 
 export type ConversationItem = {
@@ -85,6 +86,7 @@ export type ConversationItem = {
   updated_at?: string;
   created_at?: string;
   last_search_id?: string | null;
+  creating?: boolean;
 };
 
 export type ConversationDetail = ConversationItem & {
@@ -194,4 +196,9 @@ export const api = {
   deleteConversation: (id: string) =>
     request<{ ok: boolean; id: string }>(`/api/conversations/${id}`, { method: "DELETE" }),
   getConsulta: (searchId: string) => request<ConsultaRow>(`/api/consultas/${searchId}`),
+  rateConsulta: (searchId: string, qualidade: string) =>
+    request<{ id: string; qualidade: string }>(`/api/consultas/${searchId}/qualidade`, {
+      method: "PATCH",
+      body: JSON.stringify({ qualidade }),
+    }),
 };

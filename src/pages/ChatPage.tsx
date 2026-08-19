@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Composer } from "../components/Composer";
 import { MarkdownBody, visibleMessages } from "../components/MarkdownBody";
+import { RateSearchModal } from "../components/RateSearchModal";
 import { SearchParamsPanel } from "../components/SearchParamsPanel";
 import {
   api,
@@ -27,6 +28,7 @@ const SUGGESTIONS = [
 
 const SESSION_KEY = "bf_ui_session_id";
 const SNAPSHOT_KEY = "bf_ui_search_snapshot";
+const PENDING_CHAT_ID = "pending-new-chat";
 
 function readStoredSnapshot(): SearchSnapshot | null {
   try {
@@ -62,6 +64,12 @@ export function ChatPage() {
   const [snapshot, setSnapshot] = useState<SearchSnapshot | null>(() => readStoredSnapshot());
   const [maxLimit, setMaxLimit] = useState(20);
   const [dimensionKeys, setDimensionKeys] = useState<string[]>(DEFAULT_DIMENSION_KEYS);
+  const [creatingChat, setCreatingChat] = useState(false);
+  const [ratingPrompt, setRatingPrompt] = useState<{ searchId: string; query: string | null } | null>(
+    null,
+  );
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!auth.authenticated && !auth.localAuthOff) return;
@@ -189,18 +197,98 @@ export function ChatPage() {
     }
   }
 
-  async function newChat() {
-    try {
-      await api.resetChat(sessionId);
-    } catch {
-      /* nova conversa local mesmo se o reset remoto falhar */
-    }
-    sessionStorage.removeItem(SESSION_KEY);
-    persistSnapshot(null);
-    setSessionId(null);
-    setMessages([]);
+  async function startNewChat() {
+    if (creatingChat) return;
+    setCreatingChat(true);
+    setRatingPrompt(null);
+    setRatingError(null);
     setError(null);
-    setSidebarOpen(false);
+    setDraft("");
+    persistSnapshot(null);
+    setMessages([]);
+    const previousId = sessionId;
+    const pending: ConversationItem = {
+      id: PENDING_CHAT_ID,
+      title: "Nova conversa",
+      creating: true,
+      updated_at: new Date().toISOString(),
+    };
+    setSessionId(PENDING_CHAT_ID);
+    setConversations((prev) => [pending, ...prev.filter((c) => c.id !== PENDING_CHAT_ID)]);
+    try {
+      const out = await api.resetChat(previousId && previousId !== PENDING_CHAT_ID ? previousId : null);
+      const newId = out.session_id;
+      setSessionId(newId);
+      sessionStorage.setItem(SESSION_KEY, newId);
+      setConversations((prev) => {
+        const rest = prev.filter((c) => c.id !== PENDING_CHAT_ID && c.id !== newId);
+        return [
+          { id: newId, title: "Nova conversa", updated_at: new Date().toISOString() },
+          ...rest,
+        ];
+      });
+      try {
+        const data = await api.listConversations();
+        const items = data.items || [];
+        setConversations(() => {
+          if (items.some((c) => c.id === newId)) return items;
+          return [
+            { id: newId, title: "Nova conversa", updated_at: new Date().toISOString() },
+            ...items,
+          ];
+        });
+      } catch {
+        /* aba otimista já está selecionada */
+      }
+    } catch (err) {
+      sessionStorage.removeItem(SESSION_KEY);
+      setSessionId(null);
+      setConversations((prev) => prev.filter((c) => c.id !== PENDING_CHAT_ID));
+      setError(err instanceof Error ? err.message : "Não foi possível criar a conversa.");
+    } finally {
+      setCreatingChat(false);
+      setSidebarOpen(false);
+    }
+  }
+
+  async function requestNewChat() {
+    if (creatingChat || ratingPrompt || busy) return;
+    const searchId =
+      (typeof snapshot?.searchId === "string" && snapshot.searchId.trim()) ||
+      conversations.find((c) => c.id === sessionId)?.last_search_id ||
+      "";
+    if (!searchId) {
+      await startNewChat();
+      return;
+    }
+    try {
+      const row = await api.getConsulta(searchId);
+      if (row.qualidade) {
+        await startNewChat();
+        return;
+      }
+    } catch {
+      /* consulta ainda pode estar gravando — mesmo assim pedimos a avaliação */
+    }
+    setRatingError(null);
+    setRatingPrompt({
+      searchId,
+      query: typeof snapshot?.query === "string" ? snapshot.query : null,
+    });
+  }
+
+  async function submitRating(qualidade: string) {
+    if (!ratingPrompt || ratingBusy) return;
+    setRatingBusy(true);
+    setRatingError(null);
+    try {
+      await api.rateConsulta(ratingPrompt.searchId, qualidade);
+    } catch {
+      /* a escolha já foi feita; a consulta pode ainda não ter sido gravada */
+    }
+    setRatingBusy(false);
+    setRatingPrompt(null);
+    await startNewChat();
   }
 
   async function openConversation(id: string) {
@@ -232,7 +320,7 @@ export function ChatPage() {
     if (!window.confirm("Apagar esta conversa do histórico?")) return;
     try {
       await api.deleteConversation(id);
-      if (sessionId === id) await newChat();
+      if (sessionId === id) await startNewChat();
       void loadConversations();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível apagar.");
@@ -252,6 +340,14 @@ export function ChatPage() {
 
   return (
     <div className={shellClass}>
+      {ratingPrompt ? (
+        <RateSearchModal
+          query={ratingPrompt.query}
+          busy={ratingBusy}
+          error={ratingError}
+          onChoose={(qualidade) => void submitRating(qualidade)}
+        />
+      ) : null}
       {(sidebarOpen || inspectorOpen) && (
         <button
           type="button"
@@ -273,7 +369,12 @@ export function ChatPage() {
           </div>
         </div>
         <div className="sidebar-actions">
-          <button className="btn btn-primary btn-block" type="button" onClick={() => void newChat()}>
+          <button
+            className="btn btn-primary btn-block"
+            type="button"
+            disabled={creatingChat || Boolean(ratingPrompt) || busy}
+            onClick={() => void requestNewChat()}
+          >
             Nova conversa
           </button>
         </div>
@@ -288,18 +389,24 @@ export function ChatPage() {
               <div className="conv-item" key={c.id}>
                 <button
                   type="button"
-                  className={`conv-open${sessionId === c.id ? " active" : ""}`}
+                  className={`conv-open${sessionId === c.id ? " active" : ""}${c.creating ? " is-creating" : ""}`}
+                  disabled={creatingChat || Boolean(ratingPrompt) || c.creating}
                   onClick={() => void openConversation(c.id)}
                 >
                   <span className="conv-title">{c.title || "Conversa"}</span>
                   <span className="conv-meta">
-                    {c.updated_at ? new Date(c.updated_at).toLocaleString("pt-BR") : ""}
+                    {c.creating
+                      ? "Criando…"
+                      : c.updated_at
+                        ? new Date(c.updated_at).toLocaleString("pt-BR")
+                        : ""}
                   </span>
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-danger"
                   aria-label="Apagar conversa"
+                  disabled={creatingChat || Boolean(ratingPrompt) || c.creating}
                   onClick={() => void removeConversation(c.id)}
                 >
                   ×
@@ -318,6 +425,13 @@ export function ChatPage() {
       </aside>
 
       <main className="main">
+        {creatingChat ? (
+          <div className="chat-transition" role="status" aria-live="polite">
+            <div className="spinner" aria-hidden="true" />
+            <h2>Criando nova conversa</h2>
+            <p>Preparando um espaço limpo para a próxima cotação…</p>
+          </div>
+        ) : null}
         <header className="topbar">
           <button className="btn mobile-only" type="button" onClick={() => setSidebarOpen(true)}>
             Menu
@@ -366,7 +480,12 @@ export function ChatPage() {
           </div>
         ) : null}
 
-        <Composer value={draft} disabled={busy} onChange={setDraft} onSubmit={() => void send(draft)} />
+        <Composer
+          value={draft}
+          disabled={busy || creatingChat || Boolean(ratingPrompt)}
+          onChange={setDraft}
+          onSubmit={() => void send(draft)}
+        />
       </main>
 
       <aside className="inspector" aria-label="Parâmetros da busca">
@@ -381,7 +500,7 @@ export function ChatPage() {
             dimensionKeys={dimensionKeys}
             finalLimit={settings.finalLimit}
             maxLimit={maxLimit}
-            busy={busy}
+            busy={busy || creatingChat || Boolean(ratingPrompt)}
             onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
             onRerun={(payload) => void rerunSearch(payload)}
           />

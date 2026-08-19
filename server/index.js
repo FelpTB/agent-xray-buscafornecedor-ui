@@ -345,6 +345,22 @@ app.get("/api/consultas/:searchId", async (req, res) => {
   }
 });
 
+app.patch("/api/consultas/:searchId/qualidade", async (req, res) => {
+  try {
+    const result = await backendFetch(
+      `/auth/consultas/${encodeURIComponent(req.params.searchId)}/qualidade`,
+      {
+        method: "PATCH",
+        token: getToken(req),
+        body: { qualidade: req.body?.qualidade },
+      },
+    );
+    return sendBackend(res, result);
+  } catch (err) {
+    return res.status(err.status || 502).json({ error: err.message });
+  }
+});
+
 app.delete("/api/conversations/:id", async (req, res) => {
   try {
     const result = await backendFetch(`/conversations/${encodeURIComponent(req.params.id)}`, {
