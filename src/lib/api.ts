@@ -158,6 +158,11 @@ export const api = {
       status: string;
       backend?: { reachable?: boolean; auth_mode?: string };
     }>("/health", { signal: AbortSignal.timeout(8_000) }),
+  healthReady: () =>
+    request<{
+      status: string;
+      backend?: { reachable?: boolean; auth_mode?: string };
+    }>("/health/ready", { signal: AbortSignal.timeout(8_000) }),
   me: () => request<MeResponse>("/api/auth/me", { signal: AbortSignal.timeout(10_000) }),
   login: (email: string, password: string) =>
     request("/api/auth/login", {

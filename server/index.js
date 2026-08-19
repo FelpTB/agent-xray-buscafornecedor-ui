@@ -40,6 +40,36 @@ app.use(
 );
 app.use(express.json({ limit: "256kb" }));
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    service: "agent-xray-buscafornecedor-ui",
+    version: "1.0.0",
+    api_base_configured: Boolean(API_BASE),
+    uptime: process.uptime(),
+  });
+});
+
+app.get("/health/ready", async (_req, res) => {
+  let backend = { reachable: false };
+  if (API_BASE) {
+    try {
+      const r = await backendFetch("/health", { timeoutMs: 2_500 });
+      backend = { reachable: r.status === 200, ...(r.data || {}) };
+    } catch (err) {
+      backend = { reachable: false, error: err.message };
+    }
+  }
+  const ready = Boolean(API_BASE) && backend.reachable === true;
+  return res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    service: "agent-xray-buscafornecedor-ui",
+    api_base_configured: Boolean(API_BASE),
+    backend,
+    uptime: process.uptime(),
+  });
+});
+
 function parseCookies(header) {
   const out = {};
   if (!header) return out;
@@ -137,26 +167,6 @@ async function backendFetch(pathname, { method = "GET", token, body, query, time
 function sendBackend(res, result) {
   return res.status(result.status).json(result.data);
 }
-
-app.get("/health", async (_req, res) => {
-  let backend = { reachable: false };
-  if (API_BASE) {
-    try {
-      const r = await backendFetch("/health", { timeoutMs: 3_000 });
-      backend = { reachable: r.status === 200, ...(r.data || {}) };
-    } catch (err) {
-      backend = { reachable: false, error: err.message };
-    }
-  }
-  return res.json({
-    status: "ok",
-    service: "agent-xray-buscafornecedor-ui",
-    version: "1.0.0",
-    api_base_configured: Boolean(API_BASE),
-    backend,
-    uptime: process.uptime(),
-  });
-});
 
 app.post("/api/auth/login", async (req, res) => {
   try {
@@ -382,7 +392,7 @@ if (IS_PROD) {
   }
   app.use(express.static(dist, { maxAge: "1h", index: false }));
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path === "/health") return next();
+    if (req.path.startsWith("/api") || req.path === "/health" || req.path.startsWith("/health/")) return next();
     return res.sendFile(indexHtml);
   });
 }

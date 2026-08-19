@@ -55,8 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const data = await api.me();
-      const health = await api.health().catch(() => null);
-      const localAuthOff = health?.backend?.auth_mode === "off";
+      const ready = await api.healthReady().catch(() => null);
+      const localAuthOff = ready?.backend?.auth_mode === "off";
       setState({ loading: false, ...fromMe(data, localAuthOff) });
     } catch {
       setState({ ...EMPTY, loading: false });
