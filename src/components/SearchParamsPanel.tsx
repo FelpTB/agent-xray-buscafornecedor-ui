@@ -402,10 +402,6 @@ export function SearchParamsPanel({
           <h3 id="weights-title">Informações e pesos</h3>
           <ParamHint label="Informações e pesos" hint={PARAM_HINTS.weights} />
         </div>
-        <p className="help">
-          O peso total da busca deve ser 100%. Aumentar ou diminuir um dos pesos faz os outros se
-          ajustarem proporcionalmente.
-        </p>
         <p className="weight-sum" aria-live="polite">
           Total {sumPct}%
         </p>
