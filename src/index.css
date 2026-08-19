@@ -79,8 +79,16 @@ img { max-width: 100%; display: block; }
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  position: relative;
+  z-index: 2;
 }
-.inspector { border-right: 0; border-left: 1px solid hsl(var(--border)); }
+.inspector { border-right: 0; border-left: 1px solid hsl(var(--border)); z-index: 3; }
+.main {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+  background: hsl(210 20% 97%);
+  position: relative;
+  z-index: 1;
+}
 .brand {
   display: flex; align-items: center; gap: 0.65rem;
   padding: 1rem 1.1rem; border-bottom: 1px solid hsl(var(--border));
@@ -136,10 +144,6 @@ img { max-width: 100%; display: block; }
 .user-name { font-weight: 700; font-size: 0.9rem; }
 .user-meta { font-size: 0.78rem; color: hsl(var(--muted-foreground)); }
 
-.main {
-  display: flex; flex-direction: column; height: 100%; overflow: hidden;
-  background: hsl(210 20% 97%);
-}
 .topbar {
   display: flex; align-items: center; gap: 0.5rem;
   padding: 0.7rem 1rem; border-bottom: 1px solid hsl(var(--border));
@@ -271,11 +275,6 @@ img { max-width: 100%; display: block; }
 }
 .hint-pop {
   display: none;
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  width: min(16.5rem, 72vw);
-  z-index: 40;
   background: hsl(var(--secondary));
   color: white;
   padding: 0.55rem 0.7rem;
@@ -288,18 +287,28 @@ img { max-width: 100%; display: block; }
   box-shadow: var(--shadow);
   pointer-events: none;
 }
-.hint-pop::before {
+.hint-pop.is-open {
+  display: block;
+  position: fixed;
+  z-index: 80;
+  margin: 0;
+}
+.hint-pop[data-placement="left"]::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: -6px;
+  border: 6px solid transparent;
+  border-left-color: hsl(var(--secondary));
+}
+.hint-pop[data-placement="bottom"]::before {
   content: "";
   position: absolute;
   top: -6px;
-  right: 0.45rem;
+  left: 12px;
   border: 6px solid transparent;
   border-top-width: 0;
   border-bottom-color: hsl(var(--secondary));
-}
-.hint-wrap:hover .hint-pop,
-.hint-wrap:focus-within .hint-pop {
-  display: block;
 }
 .help {
   font-size: 0.8rem;
