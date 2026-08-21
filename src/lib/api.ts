@@ -32,6 +32,7 @@ export type Profile = {
 
 export type MeResponse = {
   authenticated: boolean;
+  session_state?: "ok" | "expired" | "none";
   auth: AuthView | null;
   profile?: Profile | null;
 };
@@ -168,6 +169,12 @@ export const api = {
     request("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
+    }),
+  refreshSession: () =>
+    request<MeResponse>("/api/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(10_000),
     }),
   register: (body: {
     email: string;

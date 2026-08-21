@@ -1,9 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Comprador, type MeResponse } from "./api";
 
+export type SessionState = "ok" | "expired" | "none";
+
 type AuthState = {
   loading: boolean;
   authenticated: boolean;
+  sessionState: SessionState;
   localAuthOff: boolean;
   userId: string | null;
   nome: string | null;
@@ -15,6 +18,7 @@ type AuthState = {
 const EMPTY: AuthState = {
   loading: true,
   authenticated: false,
+  sessionState: "none",
   localAuthOff: false,
   userId: null,
   nome: null,
@@ -25,6 +29,9 @@ const EMPTY: AuthState = {
 
 type AuthContextValue = AuthState & {
   refresh: () => Promise<void>;
+  reloadSession: () => Promise<boolean>;
+  markExpired: () => void;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -38,8 +45,16 @@ function fromMe(data: MeResponse, localAuthOff: boolean): Omit<AuthState, "loadi
   if (typeof limite === "number" && typeof usadas === "number") {
     quotaLabel = `${usadas} de ${limite} buscas usadas`;
   }
+  const authenticated = Boolean(data.authenticated && data.auth?.userId);
+  const sessionState: SessionState =
+    data.session_state === "ok" || data.session_state === "expired" || data.session_state === "none"
+      ? data.session_state
+      : authenticated
+        ? "ok"
+        : "none";
   return {
-    authenticated: Boolean(data.authenticated && data.auth?.userId),
+    authenticated,
+    sessionState: authenticated ? "ok" : sessionState,
     localAuthOff,
     userId: data.auth?.userId || data.profile?.user_id || null,
     nome: c?.nome || null,
@@ -59,7 +74,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const localAuthOff = ready?.backend?.auth_mode === "off";
       setState({ loading: false, ...fromMe(data, localAuthOff) });
     } catch {
-      setState({ ...EMPTY, loading: false });
+      setState((prev) => {
+        if (prev.loading && !prev.authenticated) {
+          return { ...EMPTY, loading: false, sessionState: "none" };
+        }
+        return { ...prev, loading: false };
+      });
     }
   }, []);
 
@@ -67,15 +87,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      void refresh();
+    };
+    const id = window.setInterval(tick, 45_000);
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [refresh]);
+
+  const reloadSession = useCallback(async () => {
+    try {
+      const data = await api.refreshSession();
+      const ready = await api.healthReady().catch(() => null);
+      const localAuthOff = ready?.backend?.auth_mode === "off";
+      const next = fromMe(data, localAuthOff);
+      setState({ loading: false, ...next });
+      return next.authenticated;
+    } catch {
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        authenticated: false,
+        sessionState: "expired",
+      }));
+      return false;
+    }
+  }, []);
+
+  const markExpired = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      loading: false,
+      authenticated: false,
+      sessionState: "expired",
+    }));
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    await api.login(email, password);
+    await refresh();
+  }, [refresh]);
+
   const logout = useCallback(async () => {
     try {
       await api.logout();
     } finally {
-      setState((prev) => ({ ...EMPTY, loading: false, localAuthOff: prev.localAuthOff }));
+      setState((prev) => ({
+        ...EMPTY,
+        loading: false,
+        localAuthOff: prev.localAuthOff,
+        sessionState: "none",
+      }));
     }
   }, []);
 
-  const value = useMemo(() => ({ ...state, refresh, logout }), [state, refresh, logout]);
+  const value = useMemo(
+    () => ({ ...state, refresh, reloadSession, markExpired, login, logout }),
+    [state, refresh, reloadSession, markExpired, login, logout],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -16,10 +16,12 @@ const IS_PROD =
 const PORT = Number(process.env.PORT) || 8787;
 const API_BASE = (process.env.BUSCA_API_BASE_URL || "").replace(/\/+$/, "");
 const COOKIE = "bf_session";
+const COOKIE_REFRESH = "bf_refresh";
 const COOKIE_SECURE =
   process.env.COOKIE_SECURE === "1" || (IS_PROD && process.env.COOKIE_SECURE !== "0");
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
-const FONTE = "AgentUI";
+const FONTE = "Agente";
+const CLIENT_HEADER = "agent-ui";
 
 if (IS_PROD && !API_BASE) {
   console.error("BUSCA_API_BASE_URL é obrigatório em produção.");
@@ -87,30 +89,64 @@ function getToken(req) {
   return parseCookies(req.headers.cookie)[COOKIE] || "";
 }
 
-function setSessionCookie(res, token) {
+function getRefreshToken(req) {
+  return parseCookies(req.headers.cookie)[COOKIE_REFRESH] || "";
+}
+
+function cookieParts(name, value, maxAgeMs) {
   const parts = [
-    `${COOKIE}=${encodeURIComponent(token)}`,
+    `${name}=${encodeURIComponent(value)}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
-    `Max-Age=${Math.floor(COOKIE_MAX_AGE / 1000)}`,
+    `Max-Age=${Math.max(0, Math.floor(maxAgeMs / 1000))}`,
   ];
   if (COOKIE_SECURE) parts.push("Secure");
-  res.setHeader("Set-Cookie", parts.join("; "));
+  return parts.join("; ");
 }
 
-function clearSessionCookie(res) {
-  const parts = [`${COOKIE}=`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
-  if (COOKIE_SECURE) parts.push("Secure");
-  res.setHeader("Set-Cookie", parts.join("; "));
+function appendCookies(res, cookies) {
+  const list = cookies.filter(Boolean);
+  if (!list.length) return;
+  const prev = res.getHeader("Set-Cookie");
+  const existing = !prev ? [] : Array.isArray(prev) ? prev : [prev];
+  res.setHeader("Set-Cookie", [...existing, ...list]);
 }
 
-function pickCredential(payload) {
+function setAuthCookies(res, { access, refresh }) {
+  const cookies = [];
+  if (typeof access === "string" && access.trim()) {
+    cookies.push(cookieParts(COOKIE, access.trim(), COOKIE_MAX_AGE));
+  }
+  if (typeof refresh === "string" && refresh.trim()) {
+    cookies.push(cookieParts(COOKIE_REFRESH, refresh.trim(), COOKIE_MAX_AGE));
+  } else if (refresh === "") {
+    cookies.push(cookieParts(COOKIE_REFRESH, "", 0));
+  }
+  appendCookies(res, cookies);
+}
+
+function clearAuthCookies(res) {
+  res.setHeader("Set-Cookie", [
+    cookieParts(COOKIE, "", 0),
+    cookieParts(COOKIE_REFRESH, "", 0),
+  ]);
+}
+
+function applyLoginCookies(res, payload) {
   const key = payload?.api_key?.key;
-  if (typeof key === "string" && key.trim()) return key.trim();
+  if (typeof key === "string" && key.trim()) {
+    setAuthCookies(res, { access: key.trim(), refresh: "" });
+    return true;
+  }
   const jwt = payload?.access_token;
-  if (typeof jwt === "string" && jwt.trim()) return jwt.trim();
-  return null;
+  if (typeof jwt === "string" && jwt.trim()) {
+    const refresh =
+      typeof payload?.refresh_token === "string" ? payload.refresh_token.trim() : "";
+    setAuthCookies(res, { access: jwt.trim(), refresh });
+    return true;
+  }
+  return false;
 }
 
 function publicBuyer(payload) {
@@ -125,7 +161,10 @@ function publicBuyer(payload) {
 }
 
 function authHeaders(token) {
-  const h = { Accept: "application/json" };
+  const h = {
+    Accept: "application/json",
+    "X-Busca-Client": CLIENT_HEADER,
+  };
   if (token) {
     h.Authorization = token.toLowerCase().startsWith("bearer ") ? token : `Bearer ${token}`;
     if (token.startsWith("sk_bf_")) h["X-Api-Key"] = token;
@@ -164,6 +203,31 @@ async function backendFetch(pathname, { method = "GET", token, body, query, time
   return { status: res.status, data };
 }
 
+async function tryRefresh(req, res) {
+  const refresh = getRefreshToken(req);
+  if (!refresh) return null;
+  const result = await backendFetch("/auth/refresh", {
+    method: "POST",
+    body: { refresh_token: refresh },
+    timeoutMs: 10_000,
+  });
+  if (result.status >= 200 && result.status < 300 && result.data?.access_token) {
+    applyLoginCookies(res, result.data);
+    return result.data;
+  }
+  return null;
+}
+
+async function backendFetchWithRefresh(req, res, pathname, opts = {}) {
+  let token = opts.token !== undefined ? opts.token : getToken(req);
+  const { token: _ignored, ...rest } = opts;
+  let result = await backendFetch(pathname, { ...rest, token });
+  if (result.status !== 401) return result;
+  const refreshed = await tryRefresh(req, res);
+  if (!refreshed?.access_token) return result;
+  return backendFetch(pathname, { ...rest, token: refreshed.access_token });
+}
+
 function sendBackend(res, result) {
   return res.status(result.status).json(result.data);
 }
@@ -180,8 +244,7 @@ app.post("/api/auth/login", async (req, res) => {
       },
     });
     if (result.status >= 200 && result.status < 300) {
-      const cred = pickCredential(result.data);
-      if (cred) setSessionCookie(res, cred);
+      applyLoginCookies(res, result.data);
       return res.status(result.status).json(publicBuyer(result.data));
     }
     return sendBackend(res, result);
@@ -205,8 +268,7 @@ app.post("/api/auth/register", async (req, res) => {
       },
     });
     if (result.status >= 200 && result.status < 300) {
-      const cred = pickCredential(result.data);
-      if (cred) setSessionCookie(res, cred);
+      applyLoginCookies(res, result.data);
       return res.status(result.status).json(publicBuyer(result.data));
     }
     return sendBackend(res, result);
@@ -216,16 +278,64 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (_req, res) => {
-  clearSessionCookie(res);
-  return res.json({ ok: true });
+  clearAuthCookies(res);
+  return res.json({ ok: true, session_state: "none" });
+});
+
+app.post("/api/auth/refresh", async (req, res) => {
+  try {
+    const refreshed = await tryRefresh(req, res);
+    if (!refreshed?.access_token) {
+      return res.status(401).json({
+        error: "Sessão expirada. Entre novamente.",
+        session_state: "expired",
+        authenticated: false,
+      });
+    }
+    const me = await backendFetch("/auth/me", { token: refreshed.access_token, timeoutMs: 10_000 });
+    const data = me.data && typeof me.data === "object" ? me.data : {};
+    return res.json({
+      ...data,
+      authenticated: Boolean(data.authenticated),
+      session_state: data.authenticated ? "ok" : "expired",
+    });
+  } catch (err) {
+    return res.status(err.status || 502).json({ error: err.message || "Falha ao renovar sessão" });
+  }
 });
 
 app.get("/api/auth/me", async (req, res) => {
   const token = getToken(req);
-  if (!token) return res.json({ authenticated: false, auth: null, profile: null });
+  if (!token) {
+    return res.json({ authenticated: false, session_state: "none", auth: null, profile: null });
+  }
   try {
-    const result = await backendFetch("/auth/me", { token, timeoutMs: 10_000 });
-    return sendBackend(res, result);
+    let result = await backendFetch("/auth/me", { token, timeoutMs: 10_000 });
+    if (result.status === 401) {
+      const refreshed = await tryRefresh(req, res);
+      if (refreshed?.access_token) {
+        result = await backendFetch("/auth/me", {
+          token: refreshed.access_token,
+          timeoutMs: 10_000,
+        });
+      }
+    }
+    if (result.status === 401) {
+      return res.json({
+        authenticated: false,
+        session_state: "expired",
+        auth: null,
+        profile: null,
+      });
+    }
+    if (result.status >= 500) return sendBackend(res, result);
+    const data = result.data && typeof result.data === "object" ? result.data : {};
+    const authenticated = Boolean(data.authenticated && (data.auth?.userId || data.profile?.user_id));
+    return res.status(200).json({
+      ...data,
+      authenticated,
+      session_state: authenticated ? "ok" : "expired",
+    });
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
   }
@@ -233,7 +343,7 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   try {
-    const result = await backendFetch("/config", { token: getToken(req) });
+    const result = await backendFetchWithRefresh(req, res, "/config", {});
     const cfg = result.data || {};
     return res.status(result.status).json({
       limits: cfg.limits || null,
@@ -254,7 +364,6 @@ app.get("/api/config", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const token = getToken(req);
   const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
   if (!message) return res.status(400).json({ error: "Escreva uma mensagem para o assistente." });
 
@@ -284,9 +393,8 @@ app.post("/api/chat", async (req, res) => {
   }
 
   try {
-    const result = await backendFetch("/search/xray/chat", {
+    const result = await backendFetchWithRefresh(req, res, "/search/xray/chat", {
       method: "POST",
-      token,
       body,
       timeoutMs: 120_000,
     });
@@ -294,12 +402,18 @@ app.post("/api/chat", async (req, res) => {
     if (result.status >= 200 && result.status < 300) {
       const issued = result.data?.issued_api_key;
       if (typeof issued === "string" && issued.trim()) {
-        setSessionCookie(res, issued.trim());
+        setAuthCookies(res, { access: issued.trim(), refresh: "" });
       }
       const safe = { ...result.data };
       delete safe.issued_api_key;
       if (issued) safe.session_upgraded = true;
       return res.status(result.status).json(safe);
+    }
+    if (result.status === 401) {
+      return res.status(401).json({
+        error: result.data?.error || "Sessão expirada. Entre novamente.",
+        session_state: "expired",
+      });
     }
     return sendBackend(res, result);
   } catch (err) {
@@ -309,9 +423,8 @@ app.post("/api/chat", async (req, res) => {
 
 app.post("/api/chat/reset", async (req, res) => {
   try {
-    const result = await backendFetch("/search/xray/chat/reset", {
+    const result = await backendFetchWithRefresh(req, res, "/search/xray/chat/reset", {
       method: "POST",
-      token: getToken(req),
       body: { session_id: req.body?.session_id || undefined },
     });
     return sendBackend(res, result);
@@ -322,8 +435,7 @@ app.post("/api/chat/reset", async (req, res) => {
 
 app.get("/api/conversations", async (req, res) => {
   try {
-    const result = await backendFetch("/conversations", {
-      token: getToken(req),
+    const result = await backendFetchWithRefresh(req, res, "/conversations", {
       query: { limit: req.query.limit, offset: req.query.offset },
     });
     return sendBackend(res, result);
@@ -334,9 +446,12 @@ app.get("/api/conversations", async (req, res) => {
 
 app.get("/api/conversations/:id", async (req, res) => {
   try {
-    const result = await backendFetch(`/conversations/${encodeURIComponent(req.params.id)}`, {
-      token: getToken(req),
-    });
+    const result = await backendFetchWithRefresh(
+      req,
+      res,
+      `/conversations/${encodeURIComponent(req.params.id)}`,
+      {},
+    );
     return sendBackend(res, result);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
@@ -345,9 +460,11 @@ app.get("/api/conversations/:id", async (req, res) => {
 
 app.get("/api/consultas/:searchId", async (req, res) => {
   try {
-    const result = await backendFetch(
+    const result = await backendFetchWithRefresh(
+      req,
+      res,
       `/auth/consultas/${encodeURIComponent(req.params.searchId)}`,
-      { token: getToken(req) },
+      {},
     );
     return sendBackend(res, result);
   } catch (err) {
@@ -357,11 +474,12 @@ app.get("/api/consultas/:searchId", async (req, res) => {
 
 app.patch("/api/consultas/:searchId/qualidade", async (req, res) => {
   try {
-    const result = await backendFetch(
+    const result = await backendFetchWithRefresh(
+      req,
+      res,
       `/auth/consultas/${encodeURIComponent(req.params.searchId)}/qualidade`,
       {
         method: "PATCH",
-        token: getToken(req),
         body: { qualidade: req.body?.qualidade },
       },
     );
@@ -373,10 +491,12 @@ app.patch("/api/consultas/:searchId/qualidade", async (req, res) => {
 
 app.delete("/api/conversations/:id", async (req, res) => {
   try {
-    const result = await backendFetch(`/conversations/${encodeURIComponent(req.params.id)}`, {
-      method: "DELETE",
-      token: getToken(req),
-    });
+    const result = await backendFetchWithRefresh(
+      req,
+      res,
+      `/conversations/${encodeURIComponent(req.params.id)}`,
+      { method: "DELETE" },
+    );
     return sendBackend(res, result);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });

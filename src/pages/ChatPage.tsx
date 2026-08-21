@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
+import { ReloginForm } from "../components/ReloginForm";
 import { Composer } from "../components/Composer";
 import { MarkdownBody, visibleMessages } from "../components/MarkdownBody";
 import { RateSearchModal } from "../components/RateSearchModal";
@@ -81,12 +82,15 @@ export function ChatPage() {
   );
   const [ratingBusy, setRatingBusy] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
+  const [reloginBusy, setReloginBusy] = useState(false);
+  const [reloginError, setReloginError] = useState<string | null>(null);
+  const [reloadingSession, setReloadingSession] = useState(false);
 
   useEffect(() => {
-    if (!auth.authenticated && !auth.localAuthOff) return;
+    if (!auth.authenticated && !auth.localAuthOff && auth.sessionState !== "expired") return;
     document.documentElement.classList.add("layout-fixed");
     return () => document.documentElement.classList.remove("layout-fixed");
-  }, [auth.authenticated, auth.localAuthOff]);
+  }, [auth.authenticated, auth.localAuthOff, auth.sessionState]);
 
   const persistSnapshot = useCallback((next: SearchSnapshot | null) => {
     setSnapshot(next);
@@ -98,10 +102,11 @@ export function ChatPage() {
     try {
       const data = await api.listConversations();
       setConversations(data.items || []);
-    } catch {
-      /* histórico exige sessão autenticada com userId — silencioso se vazio */
+    } catch (err) {
+      const status = (err as Error & { status?: number }).status;
+      if (status === 401) auth.markExpired();
     }
-  }, []);
+  }, [auth.markExpired]);
 
   useEffect(() => {
     if (!auth.authenticated && !auth.localAuthOff) return;
@@ -185,7 +190,13 @@ export function ChatPage() {
       applyChatResponse(data, optimistic);
       void loadConversations();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível concluir a busca.");
+      const status = (err as Error & { status?: number }).status;
+      if (status === 401) {
+        auth.markExpired();
+        setError("Sua sessão expirou. Entre novamente para continuar a busca.");
+      } else {
+        setError(err instanceof Error ? err.message : "Não foi possível concluir a busca.");
+      }
     } finally {
       setBusy(false);
     }
@@ -209,7 +220,13 @@ export function ChatPage() {
       applyChatResponse(data, optimistic);
       void loadConversations();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível refazer a busca.");
+      const status = (err as Error & { status?: number }).status;
+      if (status === 401) {
+        auth.markExpired();
+        setError("Sua sessão expirou. Entre novamente para refazer a busca.");
+      } else {
+        setError(err instanceof Error ? err.message : "Não foi possível refazer a busca.");
+      }
     } finally {
       setBusy(false);
     }
@@ -371,12 +388,60 @@ export function ChatPage() {
       </div>
     );
   }
-  if (!auth.authenticated && !auth.localAuthOff) {
+  if (!auth.authenticated && !auth.localAuthOff && auth.sessionState !== "expired") {
     return <Navigate to="/login" replace />;
+  }
+
+  const sessionExpired = !auth.authenticated && !auth.localAuthOff && auth.sessionState === "expired";
+
+  async function onRelogin(email: string, password: string) {
+    setReloginError(null);
+    setReloginBusy(true);
+    try {
+      await auth.login(email, password);
+      setError(null);
+    } catch (err) {
+      setReloginError(err instanceof Error ? err.message : "Não foi possível entrar.");
+    } finally {
+      setReloginBusy(false);
+    }
+  }
+
+  async function onReloadSession() {
+    setReloginError(null);
+    setReloadingSession(true);
+    try {
+      const ok = await auth.reloadSession();
+      if (!ok) setReloginError("Não foi possível renovar a sessão. Entre com e-mail e senha.");
+    } finally {
+      setReloadingSession(false);
+    }
   }
 
   return (
     <div className={shellClass}>
+      {sessionExpired ? (
+        <div className="session-overlay" role="alertdialog" aria-labelledby="session-expired-title">
+          <div className="session-overlay-card">
+            <p className="session-badge is-expired" id="session-expired-title">
+              Você não está mais conectado
+            </p>
+            <ReloginForm
+              busy={reloginBusy}
+              error={reloginError}
+              onSubmit={onRelogin}
+            />
+            <button
+              className="btn btn-ghost btn-block"
+              type="button"
+              disabled={reloadingSession || reloginBusy}
+              onClick={() => void onReloadSession()}
+            >
+              {reloadingSession ? "Recarregando…" : "Tentar recarregar a sessão"}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {ratingPrompt ? (
         <RateSearchModal
           query={ratingPrompt.query}
@@ -463,9 +528,31 @@ export function ChatPage() {
         <div className="user-box">
           <div className="user-name">{auth.nome || (auth.localAuthOff ? "Ambiente local" : "Comprador")}</div>
           <div className="user-meta">{auth.quotaLabel || "Sessão autenticada"}</div>
-          <button className="btn btn-ghost" type="button" onClick={() => void auth.logout()}>
-            Sair
-          </button>
+          <div
+            className={`session-badge${sessionExpired ? " is-expired" : " is-ok"}`}
+            role="status"
+            aria-live="polite"
+          >
+            {auth.localAuthOff
+              ? "Auth local desligada"
+              : sessionExpired
+                ? "Sessão expirada"
+                : "Conectado"}
+          </div>
+          {sessionExpired ? (
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={reloadingSession}
+              onClick={() => void onReloadSession()}
+            >
+              {reloadingSession ? "Recarregando…" : "Recarregar sessão"}
+            </button>
+          ) : (
+            <button className="btn btn-ghost" type="button" onClick={() => void auth.logout()}>
+              Sair
+            </button>
+          )}
         </div>
       </aside>
 
@@ -527,7 +614,7 @@ export function ChatPage() {
 
         <Composer
           value={draft}
-          disabled={busy || creatingChat || Boolean(ratingPrompt)}
+          disabled={busy || creatingChat || Boolean(ratingPrompt) || sessionExpired}
           onChange={setDraft}
           onSubmit={() => void send(draft)}
         />
@@ -545,7 +632,7 @@ export function ChatPage() {
             dimensionKeys={dimensionKeys}
             finalLimit={settings.finalLimit}
             maxLimit={maxLimit}
-            busy={busy || creatingChat || Boolean(ratingPrompt)}
+            busy={busy || creatingChat || Boolean(ratingPrompt) || sessionExpired}
             onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
             onRerun={(payload) => void rerunSearch(payload)}
           />

@@ -1,6 +1,5 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 export function LoginPage() {
@@ -12,6 +11,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reloading, setReloading] = useState(false);
 
   if (!auth.loading && (auth.authenticated || auth.localAuthOff)) {
     return <Navigate to={from} replace />;
@@ -22,13 +22,26 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await api.login(email.trim(), password);
-      await auth.refresh();
+      await auth.login(email.trim(), password);
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível entrar.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onReloadSession() {
+    setError(null);
+    setReloading(true);
+    try {
+      const ok = await auth.reloadSession();
+      if (ok) navigate(from, { replace: true });
+      else setError("Não foi possível renovar a sessão. Entre com e-mail e senha.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível renovar a sessão.");
+    } finally {
+      setReloading(false);
     }
   }
 
@@ -45,6 +58,19 @@ export function LoginPage() {
       <form className="auth-form" onSubmit={onSubmit}>
         <h2>Entrar</h2>
         <p className="lead">Acesso restrito a compradores cadastrados.</p>
+        {auth.sessionState === "expired" ? (
+          <div className="session-alert" role="status">
+            Sua sessão expirou. Entre novamente ou tente recarregar o login.
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={reloading || busy}
+              onClick={() => void onReloadSession()}
+            >
+              {reloading ? "Recarregando…" : "Recarregar sessão"}
+            </button>
+          </div>
+        ) : null}
         {error ? <div className="error" role="alert">{error}</div> : null}
         <div className="field">
           <label htmlFor="email">E-mail</label>
