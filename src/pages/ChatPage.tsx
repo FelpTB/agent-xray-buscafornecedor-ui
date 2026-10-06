@@ -4,7 +4,7 @@ import { ReloginForm } from "../components/ReloginForm";
 import { Composer } from "../components/Composer";
 import { MarkdownBody, visibleMessages } from "../components/MarkdownBody";
 import { RateSearchModal } from "../components/RateSearchModal";
-import { SearchParamsPanel } from "../components/SearchParamsPanel";
+import { SearchParamsPanel, type ParamsMode } from "../components/SearchParamsPanel";
 import {
   api,
   DEFAULT_SETTINGS,
@@ -211,7 +211,7 @@ export function ChatPage() {
     }
   }
 
-  async function rerunSearch(params: SearchParamsPayload) {
+  async function rerunSearch(params: SearchParamsPayload, mode: ParamsMode) {
     if (busy || !params.query?.trim()) return;
     setBusy(true);
     setError(null);
@@ -225,7 +225,7 @@ export function ChatPage() {
         final_limit: settings.finalLimit,
         rerank: false,
         search_params: params,
-        ...prefsToBody(prefs),
+        ...(mode === "simple" ? prefsToBody(prefs) : {}),
       });
       applyChatResponse(data, optimistic);
       void loadConversations();
@@ -674,7 +674,7 @@ export function ChatPage() {
             prefs={prefs}
             onPrefsChange={updatePrefs}
             onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
-            onRerun={(payload) => void rerunSearch(payload)}
+            onRerun={(payload, mode) => void rerunSearch(payload, mode)}
           />
         </div>
       </aside>

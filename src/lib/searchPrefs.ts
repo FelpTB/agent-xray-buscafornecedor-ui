@@ -14,7 +14,7 @@ export const WEIGHT_PRESET_OPTIONS: Option<WeightPreset>[] = [
   {
     value: "",
     label: "Automática",
-    hint: "O assistente decide a ênfase a partir do seu pedido. No painel, vale o que estiver nos pesos.",
+    hint: "O assistente decide a ênfase a partir do seu pedido e mantém os pesos que escolheu.",
   },
   {
     value: "escopo",
@@ -57,7 +57,7 @@ export const SEARCH_FOCUS_OPTIONS: Option<SearchFocus>[] = [
 ];
 
 export const PREFS_HINT =
-  "A ênfase define o que pesa mais na lista: o item pedido, o segmento atendido ou um equilíbrio. “Você procura” diz se a cotação é de produto, serviço ou dos dois. Vale para as próximas buscas e para “Refazer busca”.";
+  "A ênfase define o que pesa mais na lista: o item pedido, o segmento atendido ou um equilíbrio. “Você procura” diz se a cotação é de produto, serviço ou dos dois. Vale para as próximas buscas e para “Refazer busca” no modo Simplificado; no modo Manual valem os seus pesos.";
 
 const STORAGE_KEY = "bf_ui_search_prefs";
 const PRESETS = new Set(WEIGHT_PRESET_OPTIONS.map((o) => o.value).filter(Boolean));

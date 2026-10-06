@@ -19,6 +19,18 @@ import { ParamHint } from "./ParamHint";
 import { SearchPrefsControls } from "./SearchPrefsControls";
 import { TagInput } from "./TagInput";
 
+export type ParamsMode = "simple" | "manual";
+
+const MODE_KEY = "bf_ui_params_mode";
+
+function readStoredMode(): ParamsMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "manual" ? "manual" : "simple";
+  } catch {
+    return "simple";
+  }
+}
+
 type Props = {
   snapshot: SearchSnapshot | null;
   dimensionKeys?: string[];
@@ -28,8 +40,31 @@ type Props = {
   prefs: SearchPrefs;
   onPrefsChange: (next: SearchPrefs) => void;
   onFinalLimitChange: (n: number) => void;
-  onRerun: (payload: SearchParamsPayload) => void;
+  onRerun: (payload: SearchParamsPayload, mode: ParamsMode) => void;
 };
+
+function WeightSummary({ weights }: { weights: Record<string, number> }) {
+  const entries = Object.entries(weights)
+    .filter(([, v]) => (Number(v) || 0) > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return <p className="help">Sem pesos nesta busca.</p>;
+  return (
+    <ul className="weight-bars">
+      {entries.map(([key, value]) => {
+        const pct = Math.round(value * 100);
+        return (
+          <li key={key}>
+            <span className="weight-bars-label">{vectorLabel(key)}</span>
+            <span className="weight-bars-track" aria-hidden="true">
+              <span className="weight-bars-fill" style={{ width: `${pct}%` }} />
+            </span>
+            <span className="weight-bars-pct">{pct}%</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function LockIcon({ locked }: { locked: boolean }) {
   if (locked) {
@@ -156,6 +191,16 @@ export function SearchParamsPanel({
   const keysKey = keys.join("|");
   const max = Math.min(Math.max(maxLimit, 5), 40);
   const [draft, setDraft] = useState<SearchParamsDraft>(() => draftFromSnapshot(snapshot, keys));
+  const [mode, setMode] = useState<ParamsMode>(() => readStoredMode());
+
+  function changeMode(next: ParamsMode) {
+    setMode(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      /* sem storage: a aba vale só nesta sessão */
+    }
+  }
 
   useEffect(() => {
     const nextKeys = keysKey.split("|").filter(Boolean);
@@ -203,7 +248,6 @@ export function SearchParamsPanel({
   }
 
   function patchWeight(key: string, next: number) {
-    if (prefs.weightPreset) onPrefsChange({ ...prefs, weightPreset: "" });
     setDraft((prev) => ({
       ...prev,
       weights: adjustWeight(
@@ -236,9 +280,35 @@ export function SearchParamsPanel({
       onSubmit={(e) => {
         e.preventDefault();
         if (!canRerun) return;
-        onRerun(draftToPayload(draft, keys));
+        onRerun(draftToPayload(draft, keys), mode);
       }}
     >
+      <div className="params-tabs" role="tablist" aria-label="Modo dos parâmetros">
+        <button
+          type="button"
+          role="tab"
+          className={`params-tab${mode === "simple" ? " is-active" : ""}`}
+          aria-selected={mode === "simple"}
+          onClick={() => changeMode("simple")}
+        >
+          Simplificado
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`params-tab${mode === "manual" ? " is-active" : ""}`}
+          aria-selected={mode === "manual"}
+          onClick={() => changeMode("manual")}
+        >
+          Manual
+        </button>
+      </div>
+      <p className="help params-mode-help">
+        {mode === "simple"
+          ? "Os pesos são definidos automaticamente pela ênfase escolhida. Ajuste só o essencial e refaça a busca."
+          : "Você define o texto e o peso de cada critério. A ênfase e o foco não se aplicam: valem exatamente os pesos abaixo."}
+      </p>
+
       <section className="card" aria-labelledby="query-title">
         <div className="section-title-row">
           <h3 id="query-title">Pedido entendido</h3>
@@ -257,6 +327,33 @@ export function SearchParamsPanel({
           />
         </div>
       </section>
+
+      {mode === "simple" ? (
+        <section className="card" aria-labelledby="prefs-title">
+          <div className="section-title-row">
+            <h3 id="prefs-title">Ênfase da busca</h3>
+            <ParamHint label="Ênfase da busca" hint={PREFS_HINT} />
+          </div>
+          {usedPreset || usedFocus ? (
+            <p className="prefs-used">
+              Última busca: {[usedPreset && `ênfase “${usedPreset}”`, usedFocus && `procura “${usedFocus}”`]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          ) : null}
+          <SearchPrefsControls idPrefix="panel" prefs={prefs} disabled={busy} onChange={onPrefsChange} />
+          <div className="section-title-row weight-summary-title">
+            <h3>Como a busca está pesando</h3>
+          </div>
+          <WeightSummary weights={draft.weights} />
+          <p className="help prefs-help">
+            {prefs.weightPreset
+              ? `Ao refazer, a ênfase “${presetLabel(prefs.weightPreset)}” recalcula esses pesos.`
+              : "Ao refazer, mantém os pesos que o assistente escolheu."}{" "}
+            Para definir cada peso, use a aba Manual.
+          </p>
+        </section>
+      ) : null}
 
       <section className="card" aria-labelledby="geo-title">
         <h3 id="geo-title">Localização</h3>
@@ -385,7 +482,7 @@ export function SearchParamsPanel({
             onChange={(keywords) => setDraft((prev) => setKeywordsOnDraft(prev, keywords))}
           />
         </div>
-        {draft.keywords.length ? (
+        {mode === "manual" && draft.keywords.length ? (
           <div className="vector-row vector-row--weight-only">
             <div className="field-label-row">
               <label htmlFor="vec-w-bm25">Peso das palavras-chave</label>
@@ -406,66 +503,47 @@ export function SearchParamsPanel({
         ) : null}
       </section>
 
-      <section className="card" aria-labelledby="prefs-title">
-        <div className="section-title-row">
-          <h3 id="prefs-title">Ênfase da busca</h3>
-          <ParamHint label="Ênfase da busca" hint={PREFS_HINT} />
-        </div>
-        {usedPreset || usedFocus ? (
-          <p className="prefs-used">
-            Última busca: {[usedPreset && `ênfase “${usedPreset}”`, usedFocus && `procura “${usedFocus}”`]
-              .filter(Boolean)
-              .join(" · ")}
+      {mode === "manual" ? (
+        <section className="card" aria-labelledby="weights-title">
+          <div className="section-title-row">
+            <h3 id="weights-title">Informações e pesos</h3>
+            <ParamHint label="Informações e pesos" hint={PARAM_HINTS.weights} />
+          </div>
+          <p className="weight-sum" aria-live="polite">
+            Total {sumPct}%
           </p>
-        ) : null}
-        <SearchPrefsControls idPrefix="panel" prefs={prefs} disabled={busy} onChange={onPrefsChange} />
-      </section>
-
-      <section className="card" aria-labelledby="weights-title">
-        <div className="section-title-row">
-          <h3 id="weights-title">Informações e pesos</h3>
-          <ParamHint label="Informações e pesos" hint={PARAM_HINTS.weights} />
-        </div>
-        <p className="weight-sum" aria-live="polite">
-          Total {sumPct}%
-        </p>
-        {prefs.weightPreset ? (
-          <p className="help">
-            Com a ênfase “{presetLabel(prefs.weightPreset)}”, os pesos são recalculados ao refazer a busca.
-            Ajustar um peso aqui troca a ênfase para Automática.
-          </p>
-        ) : null}
-        {keys.map((key) => {
-          const queryFilled = Boolean((draft.queries[key] || "").trim());
-          const label = vectorLabel(key);
-          return (
-            <div className="vector-row" key={key}>
-              <div className="field-label-row">
-                <label htmlFor={`vec-q-${key}`}>{label}</label>
-                <ParamHint label={label} hint={vectorHint(key)} />
+          {keys.map((key) => {
+            const queryFilled = Boolean((draft.queries[key] || "").trim());
+            const label = vectorLabel(key);
+            return (
+              <div className="vector-row" key={key}>
+                <div className="field-label-row">
+                  <label htmlFor={`vec-q-${key}`}>{label}</label>
+                  <ParamHint label={label} hint={vectorHint(key)} />
+                </div>
+                <textarea
+                  id={`vec-q-${key}`}
+                  rows={2}
+                  value={draft.queries[key] || ""}
+                  disabled={busy}
+                  onChange={(e) => patchQuery(key, e.target.value)}
+                />
+                <WeightSlider
+                  id={`vec-w-${key}`}
+                  label={label}
+                  value={draft.weights[key] || 0}
+                  disabled={!queryFilled}
+                  locked={lockedSet.has(key)}
+                  determined={queryFilled && !lockedSet.has(key) && unlockedCount <= 1}
+                  busy={busy}
+                  onChange={(next) => patchWeight(key, next)}
+                  onToggleLock={() => toggleLock(key)}
+                />
               </div>
-              <textarea
-                id={`vec-q-${key}`}
-                rows={2}
-                value={draft.queries[key] || ""}
-                disabled={busy}
-                onChange={(e) => patchQuery(key, e.target.value)}
-              />
-              <WeightSlider
-                id={`vec-w-${key}`}
-                label={label}
-                value={draft.weights[key] || 0}
-                disabled={!queryFilled}
-                locked={lockedSet.has(key)}
-                determined={queryFilled && !lockedSet.has(key) && unlockedCount <= 1}
-                busy={busy}
-                onChange={(next) => patchWeight(key, next)}
-                onToggleLock={() => toggleLock(key)}
-              />
-            </div>
-          );
-        })}
-      </section>
+            );
+          })}
+        </section>
+      ) : null}
 
       <section className="card" aria-labelledby="limit-title">
         <div className="section-title-row">

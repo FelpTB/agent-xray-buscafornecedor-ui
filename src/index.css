@@ -411,6 +411,29 @@ img { max-width: 100%; display: block; }
 }
 
 .params-form { display: flex; flex-direction: column; gap: 1rem; }
+.params-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; padding: 0.25rem;
+  background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); border-radius: 999px;
+}
+.params-tab {
+  border: none; border-radius: 999px; padding: 0.4rem 0.6rem; background: transparent;
+  color: hsl(var(--muted-foreground)); font-size: 0.85rem; font-weight: 650;
+}
+.params-tab:hover { color: hsl(var(--secondary)); }
+.params-tab.is-active { background: hsl(var(--card)); color: hsl(var(--secondary)); box-shadow: 0 1px 4px hsl(211 67% 18% / 0.12); }
+.params-tab.is-active::before {
+  content: ""; display: inline-block; width: 0.45rem; height: 0.45rem; margin-right: 0.4rem;
+  border-radius: 999px; background: hsl(var(--primary)); vertical-align: 0.05em;
+}
+.params-tab:focus-visible { outline: 2px solid hsl(var(--ring) / 0.45); outline-offset: 1px; }
+.params-mode-help { margin: -0.4rem 0.2rem 0; }
+.weight-summary-title { margin-top: 0.9rem; }
+.weight-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.weight-bars li { display: grid; grid-template-columns: minmax(6rem, 45%) 1fr 2.4rem; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.weight-bars-label { color: hsl(var(--foreground)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.weight-bars-track { height: 0.45rem; border-radius: 999px; background: hsl(var(--border)); overflow: hidden; }
+.weight-bars-fill { display: block; height: 100%; border-radius: 999px; background: hsl(var(--primary)); }
+.weight-bars-pct { text-align: right; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 .params-actions {
   position: sticky;
   bottom: 0;
