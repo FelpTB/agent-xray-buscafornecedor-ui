@@ -56,7 +56,14 @@ export type ChatResponse = {
   reply: string;
   messages?: ChatMessage[];
   actions?: Array<Record<string, unknown>>;
-  search?: { search_id?: string; results?: SearchResult[] } | null;
+  search?: {
+    search_id?: string;
+    results?: SearchResult[];
+    weights_used?: Record<string, number> | null;
+    weights_source?: "explicit" | "preset" | "default" | null;
+    weight_preset?: string | null;
+    search_focus?: string | null;
+  } | null;
   geo?: Record<string, unknown> | null;
   intent?: string | null;
   query_manager?: Record<string, unknown> | null;
@@ -198,6 +205,8 @@ export const api = {
     final_limit: number;
     rerank?: boolean;
     search_params?: Record<string, unknown>;
+    weight_preset?: string;
+    search_focus?: string;
   }) => request<ChatResponse>("/api/chat", { method: "POST", body: JSON.stringify(body) }),
   resetChat: (session_id?: string | null) =>
     request<{ session_id: string }>("/api/chat/reset", {

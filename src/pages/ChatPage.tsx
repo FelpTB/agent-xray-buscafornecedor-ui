@@ -20,6 +20,7 @@ import {
   type SearchSnapshot,
 } from "../lib/searchExplain";
 import { DEFAULT_DIMENSION_KEYS, type SearchParamsPayload } from "../lib/searchParams";
+import { prefsToBody, readStoredPrefs, storePrefs, type SearchPrefs } from "../lib/searchPrefs";
 
 const SUGGESTIONS = [
   "Procuro fabricantes de embalagens plásticas em Campinas, raio de 50 km",
@@ -73,6 +74,7 @@ export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(() => sessionStorage.getItem(SESSION_KEY));
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [settings, setSettings] = useState<SearchSettings>(DEFAULT_SETTINGS);
+  const [prefs, setPrefs] = useState<SearchPrefs>(() => readStoredPrefs());
   const [snapshot, setSnapshot] = useState<SearchSnapshot | null>(() => readStoredSnapshot());
   const [maxLimit, setMaxLimit] = useState(20);
   const [dimensionKeys, setDimensionKeys] = useState<string[]>(DEFAULT_DIMENSION_KEYS);
@@ -96,6 +98,11 @@ export function ChatPage() {
     setSnapshot(next);
     if (next) sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(next));
     else sessionStorage.removeItem(SNAPSHOT_KEY);
+  }, []);
+
+  const updatePrefs = useCallback((next: SearchPrefs) => {
+    setPrefs(next);
+    storePrefs(next);
   }, []);
 
   const loadConversations = useCallback(async () => {
@@ -186,6 +193,7 @@ export function ChatPage() {
         session_id: sessionId,
         final_limit: settings.finalLimit,
         rerank: false,
+        ...prefsToBody(prefs),
       });
       if (data.session_upgraded) await auth.refresh();
       applyChatResponse(data, optimistic);
@@ -217,6 +225,7 @@ export function ChatPage() {
         final_limit: settings.finalLimit,
         rerank: false,
         search_params: params,
+        ...prefsToBody(prefs),
       });
       applyChatResponse(data, optimistic);
       void loadConversations();
@@ -642,7 +651,9 @@ export function ChatPage() {
         <Composer
           value={draft}
           disabled={busy || creatingChat || Boolean(ratingPrompt) || sessionExpired}
+          prefs={prefs}
           onChange={setDraft}
+          onPrefsChange={updatePrefs}
           onSubmit={() => void send(draft)}
         />
       </main>
@@ -660,6 +671,8 @@ export function ChatPage() {
             finalLimit={settings.finalLimit}
             maxLimit={maxLimit}
             busy={busy || creatingChat || Boolean(ratingPrompt) || sessionExpired}
+            prefs={prefs}
+            onPrefsChange={updatePrefs}
             onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
             onRerun={(payload) => void rerunSearch(payload)}
           />

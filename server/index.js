@@ -22,6 +22,8 @@ const COOKIE_SECURE =
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const FONTE = "Agente";
 const CLIENT_HEADER = "agent-ui";
+const WEIGHT_PRESETS = new Set(["escopo", "equilibrado", "publico_alvo"]);
+const SEARCH_FOCUSES = new Set(["produto", "servico", "mista"]);
 
 if (IS_PROD && !API_BASE) {
   console.error("BUSCA_API_BASE_URL é obrigatório em produção.");
@@ -374,6 +376,8 @@ app.post("/api/chat", async (req, res) => {
     final_limit: Number.isInteger(final_limit) && final_limit >= 1 ? final_limit : 10,
     rerank: req.body?.rerank === true,
   };
+  if (WEIGHT_PRESETS.has(req.body?.weight_preset)) body.weight_preset = req.body.weight_preset;
+  if (SEARCH_FOCUSES.has(req.body?.search_focus)) body.search_focus = req.body.search_focus;
   const sp = req.body?.search_params;
   if (sp && typeof sp === "object" && !Array.isArray(sp)) {
     body.search_params = {

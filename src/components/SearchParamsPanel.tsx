@@ -14,7 +14,9 @@ import {
   weightSum,
 } from "../lib/searchParams";
 import type { SearchSnapshot } from "../lib/searchExplain";
+import { focusLabel, PREFS_HINT, presetLabel, type SearchPrefs } from "../lib/searchPrefs";
 import { ParamHint } from "./ParamHint";
+import { SearchPrefsControls } from "./SearchPrefsControls";
 import { TagInput } from "./TagInput";
 
 type Props = {
@@ -23,6 +25,8 @@ type Props = {
   finalLimit: number;
   maxLimit?: number;
   busy?: boolean;
+  prefs: SearchPrefs;
+  onPrefsChange: (next: SearchPrefs) => void;
   onFinalLimitChange: (n: number) => void;
   onRerun: (payload: SearchParamsPayload) => void;
 };
@@ -143,6 +147,8 @@ export function SearchParamsPanel({
   finalLimit,
   maxLimit = 20,
   busy,
+  prefs,
+  onPrefsChange,
   onFinalLimitChange,
   onRerun,
 }: Props) {
@@ -165,6 +171,8 @@ export function SearchParamsPanel({
     return list;
   }, [keys, draft.queries, draft.keywords.length]);
   const unlockedCount = adjustableKeys.filter((key) => !lockedSet.has(key)).length;
+  const usedPreset = presetLabel(snapshot?.weightPreset);
+  const usedFocus = focusLabel(snapshot?.searchFocus);
 
   function patch(partial: Partial<SearchParamsDraft>) {
     setDraft((prev) => ({ ...prev, ...partial }));
@@ -195,6 +203,7 @@ export function SearchParamsPanel({
   }
 
   function patchWeight(key: string, next: number) {
+    if (prefs.weightPreset) onPrefsChange({ ...prefs, weightPreset: "" });
     setDraft((prev) => ({
       ...prev,
       weights: adjustWeight(
@@ -397,6 +406,21 @@ export function SearchParamsPanel({
         ) : null}
       </section>
 
+      <section className="card" aria-labelledby="prefs-title">
+        <div className="section-title-row">
+          <h3 id="prefs-title">Ênfase da busca</h3>
+          <ParamHint label="Ênfase da busca" hint={PREFS_HINT} />
+        </div>
+        {usedPreset || usedFocus ? (
+          <p className="prefs-used">
+            Última busca: {[usedPreset && `ênfase “${usedPreset}”`, usedFocus && `procura “${usedFocus}”`]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+        ) : null}
+        <SearchPrefsControls idPrefix="panel" prefs={prefs} disabled={busy} onChange={onPrefsChange} />
+      </section>
+
       <section className="card" aria-labelledby="weights-title">
         <div className="section-title-row">
           <h3 id="weights-title">Informações e pesos</h3>
@@ -405,6 +429,12 @@ export function SearchParamsPanel({
         <p className="weight-sum" aria-live="polite">
           Total {sumPct}%
         </p>
+        {prefs.weightPreset ? (
+          <p className="help">
+            Com a ênfase “{presetLabel(prefs.weightPreset)}”, os pesos são recalculados ao refazer a busca.
+            Ajustar um peso aqui troca a ênfase para Automática.
+          </p>
+        ) : null}
         {keys.map((key) => {
           const queryFilled = Boolean((draft.queries[key] || "").trim());
           const label = vectorLabel(key);

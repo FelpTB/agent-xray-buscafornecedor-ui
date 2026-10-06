@@ -203,7 +203,12 @@ export function draftFromSnapshot(
   const keywords = parseKeywords(
     args.bm25_query || (typeof qm?.bm25 === "string" ? qm.bm25 : ""),
   );
-  const incomingWeights = args.weights && typeof args.weights === "object" ? args.weights : {};
+  const incomingWeights =
+    snap.weightsUsed && typeof snap.weightsUsed === "object"
+      ? snap.weightsUsed
+      : args.weights && typeof args.weights === "object"
+        ? args.weights
+        : {};
   let weights: Record<string, number> = {};
   for (const k of keys) {
     const v = Number(incomingWeights[k]);

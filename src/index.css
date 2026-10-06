@@ -272,9 +272,30 @@ img { max-width: 100%; display: block; }
   border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   padding: 0.7rem 0.8rem; background: hsl(var(--muted));
 }
-.composer textarea:focus, .field input:focus, .field select:focus, .field textarea:focus, .vector-row textarea:focus, .tag-input:focus-within, .weight-pct:focus {
+.composer textarea:focus, .field input:focus, .field select:focus, .field textarea:focus, .vector-row textarea:focus, .tag-input:focus-within, .weight-pct:focus, .prefs-item select:focus {
   outline: 2px solid hsl(var(--ring) / 0.35);
   border-color: hsl(var(--primary));
+}
+.prefs-row {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center;
+  margin-top: 0.55rem;
+}
+.prefs-item { display: flex; align-items: center; gap: 0.4rem; }
+.prefs-item label {
+  font-size: 0.78rem; font-weight: 650; color: hsl(var(--muted-foreground)); white-space: nowrap;
+}
+.prefs-item select {
+  border: 1px solid hsl(var(--border)); border-radius: 999px;
+  padding: 0.25rem 0.7rem; font-size: 0.82rem;
+  background: hsl(var(--card)); color: hsl(var(--foreground));
+}
+.prefs-item select:disabled { opacity: 0.6; }
+.prefs-grid .field:last-child { margin-bottom: 0; }
+.prefs-help { margin: 0.1rem 0 0; font-size: 0.76rem; line-height: 1.4; }
+.prefs-used {
+  margin: 0 0 0.7rem; padding: 0.4rem 0.6rem; border-radius: 8px;
+  background: hsl(var(--accent)); color: hsl(var(--secondary));
+  font-size: 0.78rem; font-weight: 600;
 }
 
 .inspector-body {

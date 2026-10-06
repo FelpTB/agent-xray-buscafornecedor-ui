@@ -1,13 +1,17 @@
 import type { FormEvent } from "react";
+import type { SearchPrefs } from "../lib/searchPrefs";
+import { SearchPrefsControls } from "./SearchPrefsControls";
 
 type Props = {
   value: string;
   disabled?: boolean;
+  prefs: SearchPrefs;
   onChange: (value: string) => void;
+  onPrefsChange: (next: SearchPrefs) => void;
   onSubmit: () => void;
 };
 
-export function Composer({ value, disabled, onChange, onSubmit }: Props) {
+export function Composer({ value, disabled, prefs, onChange, onPrefsChange, onSubmit }: Props) {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!value.trim() || disabled) return;
@@ -39,6 +43,13 @@ export function Composer({ value, disabled, onChange, onSubmit }: Props) {
           Enviar
         </button>
       </div>
+      <SearchPrefsControls
+        idPrefix="composer"
+        compact
+        prefs={prefs}
+        disabled={disabled}
+        onChange={onPrefsChange}
+      />
     </form>
   );
 }

@@ -13,6 +13,8 @@ export type SearchArgs = {
   exact_terms?: string[] | string;
   final_limit?: number;
   rerank?: boolean;
+  weight_preset?: string;
+  search_focus?: string;
 };
 
 export type QueryManager = {
@@ -54,6 +56,10 @@ export type SearchSnapshot = {
   fallback?: { stages?: Array<{ name?: string }> } | boolean | null;
   resultCount?: number;
   searchId?: string | null;
+  /** Pesos efetivos aplicados pela API (após preset, foco e BM25). */
+  weightsUsed?: Record<string, number> | null;
+  weightPreset?: string | null;
+  searchFocus?: string | null;
 };
 
 export type ExplainedFact = {
@@ -125,12 +131,21 @@ export function snapshotFromChat(data: {
   query_manager?: Record<string, unknown> | null;
   geo?: Record<string, unknown> | null;
   fallback?: unknown;
-  search?: { search_id?: string; results?: unknown[] } | null;
+  search?: {
+    search_id?: string;
+    results?: unknown[];
+    weights_used?: Record<string, number> | null;
+    weight_preset?: string | null;
+    search_focus?: string | null;
+  } | null;
 }): SearchSnapshot | null {
   const args = (data.mcp_tool_call?.arguments || {}) as SearchArgs;
   const hasSearch = Boolean(data.search?.search_id || data.search?.results?.length || args.query);
   if (!hasSearch && !data.query_manager && !data.geo) return null;
   return {
+    weightsUsed: data.search?.weights_used || null,
+    weightPreset: data.search?.weight_preset || args.weight_preset || null,
+    searchFocus: data.search?.search_focus || args.search_focus || null,
     query: args.query || (data.query_manager?.query_original as string) || null,
     intent: data.intent || (data.query_manager?.intent as string) || null,
     args,
@@ -199,6 +214,9 @@ export function snapshotFromConsulta(row: {
     geo,
     fallback: Boolean(raw.fallback),
     searchId: row.id || null,
+    weightsUsed: args.weights || null,
+    weightPreset: typeof raw.weight_preset === "string" ? raw.weight_preset : null,
+    searchFocus: typeof raw.search_focus === "string" ? raw.search_focus : null,
   };
 }
 
@@ -374,7 +392,7 @@ export function explainSearch(snap: SearchSnapshot | null): ExplainedFact[] {
     });
   }
 
-  const weights = args.weights || {};
+  const weights = snap.weightsUsed || args.weights || {};
   const weightEntries = Object.entries(weights)
     .filter(([, v]) => typeof v === "number" && v > 0)
     .sort((a, b) => b[1] - a[1]);
