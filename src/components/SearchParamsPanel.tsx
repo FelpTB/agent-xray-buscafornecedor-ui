@@ -15,6 +15,7 @@ import {
 } from "../lib/searchParams";
 import type { SearchSnapshot } from "../lib/searchExplain";
 import { focusLabel, PREFS_HINT, presetLabel, type SearchPrefs } from "../lib/searchPrefs";
+import { type PresetTable, previewWeights } from "../lib/weightPreview";
 import { ParamHint } from "./ParamHint";
 import { SearchPrefsControls } from "./SearchPrefsControls";
 import { TagInput } from "./TagInput";
@@ -38,22 +39,20 @@ type Props = {
   maxLimit?: number;
   busy?: boolean;
   prefs: SearchPrefs;
+  presetTable?: PresetTable | null;
   onPrefsChange: (next: SearchPrefs) => void;
   onFinalLimitChange: (n: number) => void;
   onRerun: (payload: SearchParamsPayload, mode: ParamsMode) => void;
 };
 
-function WeightSummary({ weights }: { weights: Record<string, number> }) {
-  const entries = Object.entries(weights)
-    .filter(([, v]) => (Number(v) || 0) > 0)
-    .sort((a, b) => b[1] - a[1]);
-  if (!entries.length) return <p className="help">Sem pesos nesta busca.</p>;
+function WeightSummary({ weights, keys }: { weights: Record<string, number>; keys: string[] }) {
+  const order = Object.prototype.hasOwnProperty.call(weights, "bm25") ? [...keys, "bm25"] : keys;
   return (
     <ul className="weight-bars">
-      {entries.map(([key, value]) => {
-        const pct = Math.round(value * 100);
+      {order.map((key) => {
+        const pct = Math.round((Number(weights[key]) || 0) * 100);
         return (
-          <li key={key}>
+          <li key={key} className={pct === 0 ? "is-zero" : undefined}>
             <span className="weight-bars-label">{vectorLabel(key)}</span>
             <span className="weight-bars-track" aria-hidden="true">
               <span className="weight-bars-fill" style={{ width: `${pct}%` }} />
@@ -183,6 +182,7 @@ export function SearchParamsPanel({
   maxLimit = 20,
   busy,
   prefs,
+  presetTable,
   onPrefsChange,
   onFinalLimitChange,
   onRerun,
@@ -216,6 +216,18 @@ export function SearchParamsPanel({
     return list;
   }, [keys, draft.queries, draft.keywords.length]);
   const unlockedCount = adjustableKeys.filter((key) => !lockedSet.has(key)).length;
+  const previewed = useMemo(
+    () =>
+      previewWeights({
+        draftWeights: draft.weights,
+        preset: prefs.weightPreset,
+        focus: prefs.searchFocus,
+        dimensionKeys: keys,
+        hasBm25: draft.keywords.length > 0,
+        presetTable,
+      }),
+    [draft.weights, draft.keywords.length, prefs.weightPreset, prefs.searchFocus, keysKey, presetTable],
+  );
   const usedPreset = presetLabel(snapshot?.weightPreset);
   const usedFocus = focusLabel(snapshot?.searchFocus);
 
@@ -343,14 +355,17 @@ export function SearchParamsPanel({
           ) : null}
           <SearchPrefsControls idPrefix="panel" prefs={prefs} disabled={busy} onChange={onPrefsChange} />
           <div className="section-title-row weight-summary-title">
-            <h3>Como a busca está pesando</h3>
+            <h3>Pesos ao refazer a busca</h3>
           </div>
-          <WeightSummary weights={draft.weights} />
+          <WeightSummary weights={previewed} keys={keys} />
           <p className="help prefs-help">
             {prefs.weightPreset
-              ? `Ao refazer, a ênfase “${presetLabel(prefs.weightPreset)}” recalcula esses pesos.`
-              : "Ao refazer, mantém os pesos que o assistente escolheu."}{" "}
-            Para definir cada peso, use a aba Manual.
+              ? `Pesos da ênfase “${presetLabel(prefs.weightPreset)}”`
+              : "Pesos que o assistente escolheu"}
+            {prefs.searchFocus && prefs.searchFocus !== "mista"
+              ? `, com foco em ${prefs.searchFocus === "produto" ? "produto" : "serviço"}`
+              : ""}
+            {draft.keywords.length ? " e 20% para as palavras-chave" : ""}. Para definir cada peso, use a aba Manual.
           </p>
         </section>
       ) : null}

@@ -350,6 +350,10 @@ app.get("/api/config", async (req, res) => {
     return res.status(result.status).json({
       limits: cfg.limits || null,
       dimension_keys: Array.isArray(cfg.dimension_keys) ? cfg.dimension_keys : null,
+      weight_presets:
+        cfg.weight_presets?.dense_weights && typeof cfg.weight_presets.dense_weights === "object"
+          ? cfg.weight_presets.dense_weights
+          : null,
       auth: cfg.auth
         ? {
             required: cfg.auth.required,

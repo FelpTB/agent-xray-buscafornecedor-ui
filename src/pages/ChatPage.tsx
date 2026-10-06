@@ -21,6 +21,7 @@ import {
 } from "../lib/searchExplain";
 import { DEFAULT_DIMENSION_KEYS, type SearchParamsPayload } from "../lib/searchParams";
 import { prefsToBody, readStoredPrefs, storePrefs, type SearchPrefs } from "../lib/searchPrefs";
+import type { PresetTable } from "../lib/weightPreview";
 
 const SUGGESTIONS = [
   "Procuro fabricantes de embalagens plásticas em Campinas, raio de 50 km",
@@ -78,6 +79,7 @@ export function ChatPage() {
   const [snapshot, setSnapshot] = useState<SearchSnapshot | null>(() => readStoredSnapshot());
   const [maxLimit, setMaxLimit] = useState(20);
   const [dimensionKeys, setDimensionKeys] = useState<string[]>(DEFAULT_DIMENSION_KEYS);
+  const [presetTable, setPresetTable] = useState<PresetTable | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
   const [ratingPrompt, setRatingPrompt] = useState<{ searchId: string; query: string | null } | null>(
     null,
@@ -125,6 +127,7 @@ export function ChatPage() {
       if (Array.isArray(cfg.dimension_keys) && cfg.dimension_keys.length) {
         setDimensionKeys(cfg.dimension_keys);
       }
+      if (cfg.weight_presets && typeof cfg.weight_presets === "object") setPresetTable(cfg.weight_presets);
     });
     const existing = sessionStorage.getItem(SESSION_KEY);
     if (existing) {
@@ -672,6 +675,7 @@ export function ChatPage() {
             maxLimit={maxLimit}
             busy={busy || creatingChat || Boolean(ratingPrompt) || sessionExpired}
             prefs={prefs}
+            presetTable={presetTable}
             onPrefsChange={updatePrefs}
             onFinalLimitChange={(finalLimit) => setSettings({ finalLimit })}
             onRerun={(payload, mode) => void rerunSearch(payload, mode)}

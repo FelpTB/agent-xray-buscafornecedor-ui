@@ -197,6 +197,7 @@ export const api = {
     request<{
       limits: { final_limit_max?: number; final_limit_default?: number } | null;
       dimension_keys?: string[] | null;
+      weight_presets?: Record<string, Record<string, number>> | null;
       llm_rerank: { enabled: boolean };
     }>("/api/config"),
   chat: (body: {
