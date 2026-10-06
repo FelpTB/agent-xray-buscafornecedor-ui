@@ -68,7 +68,45 @@ export type SearchParamsPayload = {
   bm25?: boolean;
   exact_terms?: string[];
   intent?: string;
+  empty_vectors?: EmptyVectors;
 };
+
+/** Critérios em branco: "ignore" ficam de fora da busca; "query" usam o pedido entendido. */
+export type EmptyVectors = "ignore" | "query";
+
+const EMPTY_VECTORS_KEY = "bf_ui_empty_vectors";
+
+export function readStoredEmptyVectors(): EmptyVectors {
+  try {
+    return localStorage.getItem(EMPTY_VECTORS_KEY) === "query" ? "query" : "ignore";
+  } catch {
+    return "ignore";
+  }
+}
+
+export function storeEmptyVectors(value: EmptyVectors): void {
+  try {
+    localStorage.setItem(EMPTY_VECTORS_KEY, value);
+  } catch {
+    /* sem storage: a escolha vale só nesta sessão */
+  }
+}
+
+/**
+ * Textos que contam para os pesos: com "query", critérios em branco recebem o pedido
+ * entendido e passam a ter peso ajustável como os preenchidos.
+ */
+export function queriesForWeights(
+  queries: Record<string, string>,
+  mainQuery: string,
+  emptyVectors: EmptyVectors,
+): Record<string, string> {
+  if (emptyVectors !== "query") return queries;
+  const fill = mainQuery.trim() || "-";
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(queries)) out[k] = (v || "").trim() ? v : fill;
+  return out;
+}
 
 function asList(value: unknown): string[] {
   if (value == null || value === "") return [];
@@ -152,6 +190,7 @@ export function emptyDraft(dimensionKeys: string[] = DEFAULT_DIMENSION_KEYS): Se
 export function draftFromSnapshot(
   snap: SearchSnapshot | null,
   dimensionKeys: string[] = DEFAULT_DIMENSION_KEYS,
+  emptyVectors: EmptyVectors = "ignore",
 ): SearchParamsDraft {
   const base = emptyDraft(dimensionKeys);
   if (!snap) return base;
@@ -219,22 +258,32 @@ export function draftFromSnapshot(
     weights.bm25 = Number.isFinite(bm) && bm >= 0 ? bm : 0.2;
   }
 
+  const query = String(snap.query || args.query || qm?.query_original || "");
   return {
-    query: String(snap.query || args.query || qm?.query_original || ""),
+    query,
     city: String(city || ""),
     ufs,
     radiusKm,
     modeloNegocio: modelo,
     keywords,
     queries,
-    weights: weightsForFilledQueries(weights, queries, keywords.length > 0),
+    weights: weightsForFilledQueries(
+      weights,
+      queriesForWeights(queries, query, emptyVectors),
+      keywords.length > 0,
+    ),
     lockedWeights: [],
     exactTerms: asList(args.exact_terms || qm?.exact_terms),
     intent: snap.intent || qm?.intent || null,
   };
 }
 
-export function draftToPayload(draft: SearchParamsDraft, dimensionKeys: string[]): SearchParamsPayload {
+/** emptyVectors só deve ser informado quando os pesos do painel valem (modo Manual). */
+export function draftToPayload(
+  draft: SearchParamsDraft,
+  dimensionKeys: string[],
+  emptyVectors?: EmptyVectors,
+): SearchParamsPayload {
   const keys = dimensionKeys.length ? dimensionKeys : DEFAULT_DIMENSION_KEYS;
   const queries: Record<string, string> = {};
   for (const k of keys) {
@@ -248,7 +297,7 @@ export function draftToPayload(draft: SearchParamsDraft, dimensionKeys: string[]
   if (hasKeywords) weightSource.bm25 = Number(draft.weights.bm25) || 0;
   const weights = weightsForFilledQueries(
     weightSource,
-    draft.queries,
+    queriesForWeights(draft.queries, draft.query, emptyVectors ?? "ignore"),
     hasKeywords,
     draft.lockedWeights,
   );
@@ -258,6 +307,7 @@ export function draftToPayload(draft: SearchParamsDraft, dimensionKeys: string[]
     queries,
     weights,
   };
+  if (emptyVectors) payload.empty_vectors = emptyVectors;
 
   const city = draft.city.trim();
   const ufs = parseUfs(draft.ufs);
@@ -448,27 +498,54 @@ export function adjustWeight(
   return weightsForFilledQueries(out, queries, hasBm25, lockedKeys);
 }
 
-export function setKeywordsOnDraft(draft: SearchParamsDraft, keywords: string[]): SearchParamsDraft {
+export function setKeywordsOnDraft(
+  draft: SearchParamsDraft,
+  keywords: string[],
+  emptyVectors: EmptyVectors = "ignore",
+): SearchParamsDraft {
   const hadBm25 = Object.prototype.hasOwnProperty.call(draft.weights, "bm25");
   const lockedWeights = draft.lockedWeights || [];
   const next: SearchParamsDraft = { ...draft, keywords };
   const hasBm25 = keywords.length > 0;
+  const wq = queriesForWeights(draft.queries, draft.query, emptyVectors);
   if (hasBm25 && !hadBm25) {
-    next.weights = adjustWeight(
-      { ...draft.weights, bm25: 0 },
-      "bm25",
-      0.2,
-      draft.queries,
-      true,
-      lockedWeights,
-    );
+    next.weights = adjustWeight({ ...draft.weights, bm25: 0 }, "bm25", 0.2, wq, true, lockedWeights);
   } else if (!hasBm25 && hadBm25) {
     const dense = { ...draft.weights };
     delete dense.bm25;
     next.lockedWeights = lockedWeights.filter((k) => k !== "bm25");
-    next.weights = weightsForFilledQueries(dense, draft.queries, false, next.lockedWeights);
+    next.weights = weightsForFilledQueries(dense, wq, false, next.lockedWeights);
   } else {
-    next.weights = weightsForFilledQueries(draft.weights, draft.queries, hasBm25, lockedWeights);
+    next.weights = weightsForFilledQueries(draft.weights, wq, hasBm25, lockedWeights);
   }
   return next;
+}
+
+/**
+ * Aplica o tratamento dos critérios em branco ao rascunho. Com "query", se nenhum
+ * critério em branco tem peso ainda, cada um recebe uma fatia igual; com "ignore",
+ * o peso deles é redistribuído entre os preenchidos.
+ */
+export function setEmptyVectorsOnDraft(
+  draft: SearchParamsDraft,
+  emptyVectors: EmptyVectors,
+): SearchParamsDraft {
+  const hasBm25 = draft.keywords.length > 0;
+  const wq = queriesForWeights(draft.queries, draft.query, emptyVectors);
+  const weights = { ...draft.weights };
+  if (emptyVectors === "query") {
+    const blank = Object.keys(wq).filter((k) => !hasQueryText(draft.queries, k));
+    if (blank.every((k) => !(Number(weights[k]) > 0))) {
+      const active = Object.keys(wq).length + (hasBm25 ? 1 : 0);
+      for (const k of blank) weights[k] = 1 / Math.max(active, 1);
+    }
+  }
+  const lockedWeights = (draft.lockedWeights || []).filter(
+    (k) => k === "bm25" || hasQueryText(wq, k),
+  );
+  return {
+    ...draft,
+    lockedWeights,
+    weights: weightsForFilledQueries(weights, wq, hasBm25, lockedWeights),
+  };
 }

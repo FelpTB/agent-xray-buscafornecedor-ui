@@ -69,6 +69,8 @@ export const PARAM_HINTS = {
   weights:
     "O peso total da busca deve ser 100%. Aumentar ou diminuir um dos pesos faz os outros se ajustarem proporcionalmente. O cadeado trava um critério no valor atual.",
   lock: "Trava este peso no valor atual. Os demais continuam se ajustando entre si até somar 100%.",
+  emptyVectors:
+    "O que fazer com os critérios que você deixou sem texto. “Ficam de fora”: só o que você escreveu conta para a lista. “Usam o pedido entendido”: o pedido geral preenche esses critérios, e eles entram com o peso que você der.",
   limit:
     "Quantos nomes entram nesta shortlist. Use 5 a 8 para cotar rápido; 15 a 20 para mapear o mercado antes de fechar a lista.",
 } as const;

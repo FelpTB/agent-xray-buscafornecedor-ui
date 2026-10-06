@@ -24,6 +24,7 @@ const FONTE = "Agente";
 const CLIENT_HEADER = "agent-ui";
 const WEIGHT_PRESETS = new Set(["escopo", "equilibrado", "publico_alvo"]);
 const SEARCH_FOCUSES = new Set(["produto", "servico", "mista"]);
+const EMPTY_VECTORS = new Set(["query", "ignore"]);
 
 if (IS_PROD && !API_BASE) {
   console.error("BUSCA_API_BASE_URL é obrigatório em produção.");
@@ -397,6 +398,7 @@ app.post("/api/chat", async (req, res) => {
       bm25: sp.bm25 === false ? false : undefined,
       exact_terms: sp.exact_terms,
       intent: typeof sp.intent === "string" ? sp.intent : undefined,
+      empty_vectors: EMPTY_VECTORS.has(sp.empty_vectors) ? sp.empty_vectors : undefined,
     };
   }
 

@@ -5,8 +5,13 @@ import {
   DEFAULT_DIMENSION_KEYS,
   draftFromSnapshot,
   draftToPayload,
+  type EmptyVectors,
   MODELO_NEGOCIO_OPTIONS,
+  queriesForWeights,
+  readStoredEmptyVectors,
+  setEmptyVectorsOnDraft,
   setKeywordsOnDraft,
+  storeEmptyVectors,
   type SearchParamsDraft,
   type SearchParamsPayload,
   UF_OPTIONS,
@@ -190,8 +195,18 @@ export function SearchParamsPanel({
   const keys = dimensionKeys.length ? dimensionKeys : DEFAULT_DIMENSION_KEYS;
   const keysKey = keys.join("|");
   const max = Math.min(Math.max(maxLimit, 5), 40);
-  const [draft, setDraft] = useState<SearchParamsDraft>(() => draftFromSnapshot(snapshot, keys));
   const [mode, setMode] = useState<ParamsMode>(() => readStoredMode());
+  const [emptyVectors, setEmptyVectors] = useState<EmptyVectors>(() => readStoredEmptyVectors());
+  const [draft, setDraft] = useState<SearchParamsDraft>(() =>
+    setEmptyVectorsOnDraft(draftFromSnapshot(snapshot, keys, emptyVectors), emptyVectors),
+  );
+  const fillEmpty = emptyVectors === "query";
+
+  function changeEmptyVectors(next: EmptyVectors) {
+    setEmptyVectors(next);
+    storeEmptyVectors(next);
+    setDraft((prev) => setEmptyVectorsOnDraft(prev, next));
+  }
 
   function changeMode(next: ParamsMode) {
     setMode(next);
@@ -204,17 +219,18 @@ export function SearchParamsPanel({
 
   useEffect(() => {
     const nextKeys = keysKey.split("|").filter(Boolean);
-    setDraft(draftFromSnapshot(snapshot, nextKeys.length ? nextKeys : DEFAULT_DIMENSION_KEYS));
+    const loaded = draftFromSnapshot(snapshot, nextKeys.length ? nextKeys : DEFAULT_DIMENSION_KEYS, emptyVectors);
+    setDraft(setEmptyVectorsOnDraft(loaded, emptyVectors));
   }, [snapshot, keysKey]);
 
   const canRerun = Boolean(snapshot) && Boolean(draft.query.trim()) && !busy;
   const sumPct = Math.round(weightSum(draft.weights) * 100);
   const lockedSet = useMemo(() => new Set(draft.lockedWeights || []), [draft.lockedWeights]);
   const adjustableKeys = useMemo(() => {
-    const list = keys.filter((key) => Boolean((draft.queries[key] || "").trim()));
+    const list = fillEmpty ? [...keys] : keys.filter((key) => Boolean((draft.queries[key] || "").trim()));
     if (draft.keywords.length) list.push("bm25");
     return list;
-  }, [keys, draft.queries, draft.keywords.length]);
+  }, [keys, draft.queries, draft.keywords.length, fillEmpty]);
   const unlockedCount = adjustableKeys.filter((key) => !lockedSet.has(key)).length;
   const previewed = useMemo(
     () =>
@@ -242,19 +258,24 @@ export function SearchParamsPanel({
       const has = Boolean(text.trim());
       const hasBm25 = prev.keywords.length > 0;
       const weights = { ...prev.weights };
-      if (!had && has) {
+      if (!had && has && !fillEmpty) {
         const filled =
           Object.keys(queries).filter((k) => (queries[k] || "").trim()).length + (hasBm25 ? 1 : 0);
         weights[key] = 1 / Math.max(filled, 1);
       }
-      const lockedWeights = has
+      const lockedWeights = has || fillEmpty
         ? prev.lockedWeights || []
         : (prev.lockedWeights || []).filter((k) => k !== key);
       return {
         ...prev,
         queries,
         lockedWeights,
-        weights: weightsForFilledQueries(weights, queries, hasBm25, lockedWeights),
+        weights: weightsForFilledQueries(
+          weights,
+          queriesForWeights(queries, prev.query, emptyVectors),
+          hasBm25,
+          lockedWeights,
+        ),
       };
     });
   }
@@ -266,7 +287,7 @@ export function SearchParamsPanel({
         prev.weights,
         key,
         next,
-        prev.queries,
+        queriesForWeights(prev.queries, prev.query, emptyVectors),
         prev.keywords.length > 0,
         prev.lockedWeights,
       ),
@@ -292,7 +313,7 @@ export function SearchParamsPanel({
       onSubmit={(e) => {
         e.preventDefault();
         if (!canRerun) return;
-        onRerun(draftToPayload(draft, keys), mode);
+        onRerun(draftToPayload(draft, keys, mode === "manual" ? emptyVectors : undefined), mode);
       }}
     >
       <div className="params-tabs" role="tablist" aria-label="Modo dos parâmetros">
@@ -494,7 +515,7 @@ export function SearchParamsPanel({
             values={draft.keywords}
             disabled={busy}
             placeholder="Termo + Enter ou espaço"
-            onChange={(keywords) => setDraft((prev) => setKeywordsOnDraft(prev, keywords))}
+            onChange={(keywords) => setDraft((prev) => setKeywordsOnDraft(prev, keywords, emptyVectors))}
           />
         </div>
         {mode === "manual" && draft.keywords.length ? (
@@ -524,11 +545,27 @@ export function SearchParamsPanel({
             <h3 id="weights-title">Informações e pesos</h3>
             <ParamHint label="Informações e pesos" hint={PARAM_HINTS.weights} />
           </div>
+          <div className="field">
+            <div className="field-label-row">
+              <label htmlFor="param-empty-vectors">Critérios em branco</label>
+              <ParamHint label="Critérios em branco" hint={PARAM_HINTS.emptyVectors} />
+            </div>
+            <select
+              id="param-empty-vectors"
+              value={emptyVectors}
+              disabled={busy}
+              onChange={(e) => changeEmptyVectors(e.target.value === "query" ? "query" : "ignore")}
+            >
+              <option value="ignore">Ficam de fora da busca</option>
+              <option value="query">Usam o pedido entendido</option>
+            </select>
+          </div>
           <p className="weight-sum" aria-live="polite">
             Total {sumPct}%
           </p>
           {keys.map((key) => {
             const queryFilled = Boolean((draft.queries[key] || "").trim());
+            const weighted = queryFilled || fillEmpty;
             const label = vectorLabel(key);
             return (
               <div className="vector-row" key={key}>
@@ -540,6 +577,7 @@ export function SearchParamsPanel({
                   id={`vec-q-${key}`}
                   rows={2}
                   value={draft.queries[key] || ""}
+                  placeholder={fillEmpty ? "Em branco: usa o pedido entendido" : "Em branco: fica de fora da busca"}
                   disabled={busy}
                   onChange={(e) => patchQuery(key, e.target.value)}
                 />
@@ -547,9 +585,9 @@ export function SearchParamsPanel({
                   id={`vec-w-${key}`}
                   label={label}
                   value={draft.weights[key] || 0}
-                  disabled={!queryFilled}
+                  disabled={!weighted}
                   locked={lockedSet.has(key)}
-                  determined={queryFilled && !lockedSet.has(key) && unlockedCount <= 1}
+                  determined={weighted && !lockedSet.has(key) && unlockedCount <= 1}
                   busy={busy}
                   onChange={(next) => patchWeight(key, next)}
                   onToggleLock={() => toggleLock(key)}
