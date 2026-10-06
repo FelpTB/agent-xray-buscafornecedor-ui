@@ -13,6 +13,7 @@ type AuthState = {
   email: string | null;
   comprador: Comprador | null;
   quotaLabel: string | null;
+  acessoAgente: boolean | null;
 };
 
 const EMPTY: AuthState = {
@@ -25,6 +26,7 @@ const EMPTY: AuthState = {
   email: null,
   comprador: null,
   quotaLabel: null,
+  acessoAgente: null,
 };
 
 type AuthContextValue = AuthState & {
@@ -36,6 +38,13 @@ type AuthContextValue = AuthState & {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function readAcessoAgente(c: Comprador | null): boolean | null {
+  if (!c) return null;
+  if (typeof c.acesso_agente === "boolean") return c.acesso_agente;
+  if (typeof c.acessoAgente === "boolean") return c.acessoAgente;
+  return null;
+}
 
 function fromMe(data: MeResponse, localAuthOff: boolean): Omit<AuthState, "loading"> {
   const c = data.profile?.comprador || data.auth?.comprador || null;
@@ -61,6 +70,7 @@ function fromMe(data: MeResponse, localAuthOff: boolean): Omit<AuthState, "loadi
     email: null,
     comprador: c,
     quotaLabel: quotaLabel || (localAuthOff ? "Ambiente local (auth desligada)" : null),
+    acessoAgente: readAcessoAgente(c),
   };
 }
 

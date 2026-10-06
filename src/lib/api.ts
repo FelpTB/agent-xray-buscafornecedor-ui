@@ -5,9 +5,11 @@ export type Comprador = {
   tier_busca?: string;
   limite_buscas?: number;
   buscas_realizadas?: number;
+  acesso_agente?: boolean;
   tierBusca?: string;
   limiteBuscas?: number;
   buscasRealizadas?: number;
+  acessoAgente?: boolean;
 };
 
 export type AuthView = {

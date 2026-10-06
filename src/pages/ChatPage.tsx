@@ -110,6 +110,7 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!auth.authenticated && !auth.localAuthOff) return;
+    if (auth.acessoAgente === false) return;
     void loadConversations();
     void api.config().then((cfg) => {
       const max = cfg.limits?.final_limit_max;
@@ -138,7 +139,7 @@ export function ChatPage() {
         }
       })();
     }
-  }, [auth.authenticated, auth.localAuthOff, loadConversations, persistSnapshot]);
+  }, [auth.authenticated, auth.localAuthOff, auth.acessoAgente, loadConversations, persistSnapshot]);
 
   const shellClass = [
     "app-shell",
@@ -390,6 +391,32 @@ export function ChatPage() {
   }
   if (!auth.authenticated && !auth.localAuthOff && auth.sessionState !== "expired") {
     return <Navigate to="/login" replace />;
+  }
+
+  if (auth.authenticated && auth.acessoAgente === false) {
+    return (
+      <div className="auth-page">
+        <section className="auth-hero">
+          <img src="/logo-header.png" alt="" />
+          <h1>Modo de busca com agente em acesso restrito</h1>
+          <p>
+            Sua conta está autenticada, mas o assistente conversacional ainda não foi
+            liberado para este perfil. A busca tradicional da plataforma continua
+            disponível. Se você faz parte do grupo piloto, fale com a ABC Advise.
+          </p>
+        </section>
+        <section className="auth-form">
+          <h2>Acesso pendente</h2>
+          <p className="lead">
+            {auth.nome ? `${auth.nome}, ` : ""}o modo agente está limitado aos
+            compradores habilitados na allowlist.
+          </p>
+          <button className="btn btn-primary btn-block" type="button" onClick={() => void auth.logout()}>
+            Sair
+          </button>
+        </section>
+      </div>
+    );
   }
 
   const sessionExpired = !auth.authenticated && !auth.localAuthOff && auth.sessionState === "expired";
